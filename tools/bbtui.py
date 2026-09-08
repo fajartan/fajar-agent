@@ -1076,7 +1076,7 @@ class LlmChatScreen(ModalScreen):
             if role == "user" and isinstance(c, str):
                 if c.startswith("[TARGET CONTEXT]") or c.startswith("[ARTEFAK"):
                     log.write("[dim]  · (konteks target dimuat)[/]"); continue
-                log.write(f"\n[b green]▶ kamu[/]\n  {escape(c[:1500])}")
+                self._write_user(c[:1500])
             elif role == "assistant":
                 text = ""
                 if isinstance(c, list): text = "".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
@@ -1233,7 +1233,7 @@ class LlmChatScreen(ModalScreen):
         cand = text.strip().strip('"').strip("'")                   # drag-drop path → ingest
         if (os.sep in cand or cand.startswith("~")) and os.path.exists(os.path.expanduser(cand)):
             log.write(f"\n[b green]📎 upload[/] {cand}"); self._ingest_path(cand); return
-        log.write(f"\n[b green]▶ kamu[/]\n  {text}")
+        self._write_user(text)
         self._send(text)
     # ---- render jawaban agent: prosa rapi + tabel markdown jadi Rich Table ----
     @staticmethod
@@ -1242,6 +1242,12 @@ class LlmChatScreen(ModalScreen):
     def _is_sep(l):
         s = l.strip().strip("|")
         return bool(s) and all(set(c.strip()) <= set("-:") and c.strip() for c in s.split("|"))
+    def _write_user(self, text):
+        from rich.panel import Panel
+        from rich.text import Text
+        log = self.query_one("#chatlog", RichLog)
+        log.write("")
+        log.write(Panel(Text(text), title="▶ kamu", title_align="left", border_style="green", padding=(0, 1)))
     def _build_table(self, rows):
         from rich.table import Table
         from rich.markup import escape
