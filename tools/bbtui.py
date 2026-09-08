@@ -12,7 +12,8 @@ import json, os, re, sys, base64, shlex, shutil, datetime, subprocess, urllib.re
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll, Center, Middle
-    from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button
+    from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList
+    from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
     from textual import work
 except ImportError:
@@ -497,6 +498,8 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chatbar { dock: bottom; height: 3; }
 #chatinput { width: 1fr; border: tall $accent; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
+#slashbox { dock: bottom; height: auto; max-height: 12; margin: 0 0 3 0; border: round $accent; background: $panel; display: none; }
+#slashbox.on { display: block; }
 """
 
 BANNER = (
@@ -933,9 +936,10 @@ class LlmChatScreen(ModalScreen):
             yield Static(self._headerline(), id="chathdr")
             yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
             yield Static(self._statusline(), id="chatstatus")
+            yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("⏹", id="btnstop", variant="error")
-                yield Input(placeholder=("ketik goal atau /help  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+                yield Input(placeholder=("ketik goal atau /  (daftar perintah)  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
                 yield Button("➤ Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
@@ -1140,7 +1144,49 @@ class LlmChatScreen(ModalScreen):
         except Exception: pass
         log.write(f"[green]📎 ditambahkan ke konteks:[/] {label} [dim]({len(content)} char)[/]. "
                   "Beri instruksi (mis. 'cari endpoint & secret di artefak ini').")
+    # ---- palette slash (autocomplete) ----
+    def _slash_box(self):
+        try: return self.query_one("#slashbox", OptionList)
+        except Exception: return None
+    def on_input_changed(self, ev):
+        if ev.input.id != "chatinput": return
+        box = self._slash_box()
+        if box is None: return
+        v = ev.value
+        if v.startswith("/"):
+            q = v[1:].lower()
+            box.clear_options()
+            for c, d in SLASH_HELP:
+                cmd = c.split()[0]                      # token perintah, mis. /model
+                if q in cmd.lower() or q in d.lower():
+                    box.add_option(Option(f"{c}  —  {d}", id=cmd))
+            if box.option_count:
+                box.add_class("on"); box.highlighted = 0
+            else:
+                box.remove_class("on")
+        else:
+            box.remove_class("on")
+    def _fill_slash(self, run=False):
+        box = self._slash_box()
+        if not box or not box.has_class("on") or box.highlighted is None: return False
+        opt = box.get_option_at_index(box.highlighted); cmd = opt.id or opt.prompt.split()[0]
+        box.remove_class("on")
+        inp = self.query_one("#chatinput", Input)
+        if run: inp.value = ""; self._submit(cmd)
+        else: inp.value = cmd + " "; inp.focus()
+        return True
+    def on_key(self, ev):
+        box = self._slash_box()
+        if not box or not box.has_class("on"): return
+        if ev.key == "down": box.action_cursor_down(); ev.stop(); ev.prevent_default()
+        elif ev.key == "up": box.action_cursor_up(); ev.stop(); ev.prevent_default()
+        elif ev.key == "tab": self._fill_slash(run=False); ev.stop(); ev.prevent_default()
+        elif ev.key == "escape": box.remove_class("on"); ev.stop(); ev.prevent_default()
+    def on_option_list_option_selected(self, ev):   # klik mouse pada opsi
+        if ev.option_list.id == "slashbox": self._fill_slash(run=True)
     def on_input_submitted(self, ev):
+        if self._slash_box() and self._slash_box().has_class("on"):   # palette aktif → Enter = pilih & jalankan
+            self._fill_slash(run=True); return
         text = ev.value.strip(); ev.input.value = ""
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
