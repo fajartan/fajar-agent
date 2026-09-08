@@ -343,6 +343,8 @@ SplashScreen { align: center middle; }
 #splash { width: auto; height: auto; text-align: center; padding: 2 6; border: round $accent; background: $panel; }
 ModalScreen { align: center middle; }
 ModalScreen #stat { width: 84; max-height: 90%; border: round $accent; padding: 1 2; background: $panel; }
+ModalScreen #stat Label { width: 100%; }
+ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chatwrap { width: 92%; height: 90%; border: round $accent; background: $panel; }
@@ -770,7 +772,7 @@ class LlmChatScreen(ModalScreen):
         super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
-        self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None
+        self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
         # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
@@ -857,9 +859,11 @@ class LlmChatScreen(ModalScreen):
                       f"· aset: {', '.join(present) or '-'}  · wildcard: {len(self.target.get('wild',[]))}  · sev: {self.target.get('maxsev','-')}")
             log.write("[dim]💬 sesi chat BARU & bersih untuk target ini. Scope resmi sudah dimuat ke konteks.[/]")
             prev = la.session_load(self.sess_key)
-            if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) — ketik [b]/resume[/] untuk lanjutkan (menimpa sesi baru).[/]")
-            inp.value = f"Mulai SCOPE-GATE untuk {self.target.get('name')} pakai TARGET CONTEXT, lalu susun rencana hunting bertahap sesuai jenis aset."
-            log.write("[dim]💡 goal terisi di bawah — tekan Kirim/Enter untuk mulai (tidak jalan otomatis).[/]")
+            if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) — ketik [b]/resume[/] untuk lanjutkan.[/]")
+            log.write("\n[b yellow]⏸ AGENT BELUM JALAN — menunggu perintahmu.[/]")
+            log.write("[dim]Tekan Enter/Kirim untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
+            log.write(f"[dim]  saran: “mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF”[/]")
+            self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
         log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹ atau esc=stop proses · [b]Ctrl+Q atau /quit=keluar sesi[/] · q di layar utama=tutup aplikasi[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
@@ -868,6 +872,7 @@ class LlmChatScreen(ModalScreen):
     def on_button_pressed(self, ev):
         if ev.button.id == "btnsend":
             inp = self.query_one("#chatinput", Input); v = inp.value.strip(); inp.value = ""
+            if not v and self._suggest: v = self._suggest
             if v: self._submit(v)
         elif ev.button.id == "btnstop":
             self.action_stop()
@@ -987,6 +992,7 @@ class LlmChatScreen(ModalScreen):
                   "Beri instruksi (mis. 'cari endpoint & secret di artefak ini').")
     def on_input_submitted(self, ev):
         text = ev.value.strip(); ev.input.value = ""
+        if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
     def _submit(self, text):
         log = self.query_one("#chatlog", RichLog)
@@ -1001,6 +1007,7 @@ class LlmChatScreen(ModalScreen):
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
+        self._suggest = ""   # saran goal terpakai sekali
         self.busy = True; self.activity = "berpikir"; self.turns += 1; self.t0 = datetime.datetime.now(); self._refresh_bars()
         self._worker = self._run_stage(text, prov, model, base, key)
     @work(thread=True)
