@@ -12,7 +12,7 @@ import json, os, re, sys, base64, shlex, shutil, datetime, subprocess, urllib.re
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll, Center, Middle
-    from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList
+    from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar
     from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
     from textual import work
@@ -495,8 +495,11 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatlog { height: 1fr; padding: 0 1; background: $surface; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
-#thinking { height: 1; padding: 0 1; color: $warning; display: none; }
-#thinking.on { display: block; }
+#thinkwrap { dock: bottom; height: 1; margin: 0 0 3 0; padding: 0 1; display: none; }
+#thinkwrap.on { display: block; }
+#thinklbl { width: auto; color: $accent; }
+#thinking { width: 1fr; }
+#thinking Bar > .bar--indeterminate { color: $accent; }
 #chatbar { dock: bottom; height: 3; }
 #chatinput { width: 1fr; border: tall $accent; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
@@ -942,7 +945,9 @@ class LlmChatScreen(ModalScreen):
             yield Static(self._headerline(), id="chathdr")
             yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
             yield Static(self._statusline(), id="chatstatus")
-            yield Static("", id="thinking")
+            with Horizontal(id="thinkwrap"):
+                yield Static("⏳ memproses", id="thinklbl")
+                yield ProgressBar(id="thinking", show_percentage=False, show_eta=False)
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("⏹", id="btnstop", variant="error")
@@ -981,16 +986,18 @@ class LlmChatScreen(ModalScreen):
         self.query_one("#chatstatus", Static).update(self._statusline())
     def _tick(self):
         self._refresh_bars()
-        try: th = self.query_one("#thinking", Static)
+        try:
+            wrap = self.query_one("#thinkwrap"); pb = self.query_one("#thinking", ProgressBar)
+            lbl = self.query_one("#thinklbl", Static)
         except Exception: return
         if self.busy:
             self._tk += 1
-            kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
+            pb.update(total=None)   # bar indeterminate (animasi jalan sendiri)
             word = self.THINK_WORD[(self._tk // 2) % len(self.THINK_WORD)]
-            dots = "." * (self._tk % 4)
-            th.update(f"[yellow]{kao}[/]  [dim italic]{word}{dots}[/]"); th.add_class("on")
+            lbl.update(f"[dim italic]{word}[/]")
+            wrap.add_class("on")
         else:
-            th.remove_class("on")
+            wrap.remove_class("on")
     def on_mount(self):
         log = self.query_one("#chatlog", RichLog)
         prov, model, _b, key = _llm_creds(self.cfg)
