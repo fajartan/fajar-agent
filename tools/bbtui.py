@@ -1035,8 +1035,10 @@ class LlmChatScreen(ModalScreen):
                 w(f"  [yellow]⚙[/] [b]{nm}[/] [dim]{_e(arg[:120])}[/]")
             elif kind == "result":
                 from rich.markup import escape as _e
-                lines = body.splitlines()[:14]
-                w("  [dim]" + "\n  ".join(_e(l[:160]) for l in lines) + ("\n  …" if len(body.splitlines()) > 14 else "") + "[/]")
+                lines = [l for l in body.splitlines() if l.strip()]
+                head = _e(lines[0].lstrip("#").strip()[:130]) if lines else "(kosong)"
+                more = f" [dim]… +{len(lines)-1} baris (dipakai agent, tak ditampilkan penuh)[/]" if len(lines) > 1 else ""
+                w(f"  [dim]▸[/] {head}{more}")
             else:
                 from rich.markup import escape as _e
                 w(f"[red]⚠ {_e(body)}[/]")

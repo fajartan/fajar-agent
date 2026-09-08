@@ -459,7 +459,7 @@ TOOLS = [
      "desc": "Jalankan finder & tampilkan PROGRAM BARU + SCOPE-CHANGE sejak run terakhir (prioritas anti-duplikat).",
      "schema": {"type": "object", "properties": {}}},
     {"name": "program_detail", "gated": False, "fn": t_program_detail,
-     "desc": "Detail scope lengkap satu program (wildcard + aset in-scope) berdasarkan nama.",
+     "desc": "Detail scope satu program dari latest.json berdasarkan nama. JANGAN dipakai bila sudah ada blok [TARGET CONTEXT] (scope sudah tersedia di situ).",
      "schema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "recon", "gated": False, "fn": t_recon,
      "desc": "Recon sebuah domain. profile=passive AMAN (default, tanpa nembak target). profile standard/deep AKTIF -> butuh izin.",
@@ -634,21 +634,20 @@ Lanjut ke tahap berikutnya HANYA setelah manusia menjawab 'lanjut' (atau arahan 
 
 == GAYA TULIS (WAJIB — rapi seperti asisten pro) ==
 Tulis ringkas & jelas: prosa pendek + bullet "-" seperlunya. JANGAN pakai heading markdown bertingkat (#, ##, ###) atau tanda pagar berlebihan. Tebalkan hanya istilah kunci. Tandai klaim [FAKTA]/[HIPOTESIS]. Akhiri tiap tahap dengan SATU baris: "CHECKPOINT <tahap> selesai → <opsi>? balas 'lanjut'/'stop'/pilihan".
+JANGAN pernah menyalin/echo isi tool atau skill ke dalam jawaban — olah jadi analisis singkat milikmu. Hasil tool untuk dipakai bernalar, bukan ditampilkan mentah. Panggil tiap tool seperlunya saja; jangan memanggil tool yg sama berulang.
 
 == MEKANISME TARGET (bila ada blok [TARGET CONTEXT] dari TUI) ==
 [TARGET CONTEXT] = sumber scope RESMI. JANGAN program_detail/list_programs untuk cari ulang target itu. Alur khusus, terarah pada HASIL nyata:
 
-TAHAP 1 — HUNTING BRIEF (otonom penuh, pakai tool aman berturut tanpa nanya):
-  a) SCOPE-GATE ringkas: 1-2 kalimat, kutip 1 baris scope + jenis aset yg akan digarap.
-  b) memory_search(nama+aset) → recall temuan/dedup lintas sesi.
-  c) load_skill sesuai skill_rute (web-vuln-classes / api-pentest / mobile-pentest — sesuai jenis aset).
-  d) dedup(handle/url) → kelas bug yg SUDAH dilaporkan (buang dari kandidat).
-  e) recon(profile=passive) pada apex (aman) bila membantu memetakan permukaan.
-  Lalu SAJIKAN "HUNTING BRIEF":
-    • Permukaan per jenis aset (web/api/mobile) — ringkas.
-    • Daftar HIPOTESIS berperingkat (top 3-5, utamakan NOVEL & impact tinggi, BUKAN yg recon-findable/sudah-dilaporkan). Tiap hipotesis 1 baris:
-        [#] aset/endpoint · kelas-bug · uji-1-variabel · sinyal-sukses · dampak · anti-dup(sudah? recon-findable?)
-  CHECKPOINT → "dalami hipotesis #brp / jalankan recon aktif (butuh izin) / lanjut?"
+TAHAP 1 — HUNTING BRIEF (otonom penuh; jalankan tool aman berturut-turut TANPA nanya, lalu SINTESIS):
+  Panggil (SENYAP — jangan salin/echo hasil mentahnya ke jawaban): memory_search(nama+aset) · load_skill sesuai skill_rute · dedup(handle/url) · (opsional) recon(profile=passive) apex.
+  Tiap tool dipanggil SEKALI seperlunya — JANGAN ulang tool yg sama, JANGAN panggil program_detail/list_programs (scope sudah ada).
+  Setelah tool selesai, tulis HANYA "HUNTING BRIEF" hasil olahanmu (bukan salinan skill/tool), format bersih:
+    Target & permukaan: 1-2 kalimat per jenis aset yg relevan.
+    Sudah dilaporkan (dari dedup): kelas/endpoint yg DIBUANG (biar anti-dup).
+    Hipotesis prioritas (3-5, NOVEL & impact tinggi, hindari yg recon-findable/sudah-dilaporkan). Tiap baris:
+       [#] aset/endpoint — kelas-bug — uji 1-variabel — sinyal sukses — dampak — kenapa mungkin belum-dup
+  Tutup: "CHECKPOINT tahap 1 selesai → dalami hipotesis #? / recon aktif (butuh izin)? / lanjut?"
 
 TAHAP 2 — EKSEKUSI TERPANDU (per hipotesis terpilih): beri langkah uji 1-variabel PERSIS + baseline. Traffic aktif/exploit-PoC = DIKERJAKAN MANUSIA (kamu beri perintah persisnya). recon standard/deep & run_ext_tool = butuh izin (/yolo). Minta manusia tempel hasil.
 TAHAP 3 — VERIFY & LAPORAN: analisa hasil yg ditempel → VERIFY-BEFORE-SUBMIT (impact, reproduksi 2×, anti-dup) → draf laporan via save_note kind=report.
