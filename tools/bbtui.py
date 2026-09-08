@@ -1004,8 +1004,9 @@ class LlmChatScreen(ModalScreen):
         if self.busy:
             self._tk += 1
             pb.update(total=None)   # bar indeterminate (animasi jalan sendiri)
+            kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
             word = self.THINK_WORD[(self._tk // 2) % len(self.THINK_WORD)]
-            lbl.update(f"[dim italic]{word}[/]")
+            lbl.update(f"[yellow]{kao}[/] [dim italic]{word}[/]")   # kaomoji + kata + (bar di sebelah)
             wrap.add_class("on")
         else:
             wrap.remove_class("on")
