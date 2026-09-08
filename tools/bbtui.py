@@ -1360,12 +1360,11 @@ class SchedulerScreen(ModalScreen):
 
 class BBTUI(App):
     CSS = CSS
-    ENABLE_COMMAND_PALETTE = False   # matikan palette bawaan Textual (ctrl+p) yg bikin bingung
-    TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"
+    TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
     BINDINGS = [("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
-                ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"), ("ctrl+t", "theme", "tema"),
+                ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("escape", "clear_search", "")]
     def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
     def compose(self) -> ComposeResult:
@@ -1373,16 +1372,7 @@ class BBTUI(App):
         with Horizontal(id="body"):
             with Vertical(id="side"):
                 yield Static("memuat...", id="stat")
-                yield Static(
-                    "[b cyan]— MENU —[/]\n"
-                    "[b]s[/] Settings (kriteria/API key)\n"
-                    "[b]l[/] LLM Agent   [b]x[/] Ext-tools\n"
-                    "[b]e[/] Recon  [b]m[/] Monitor  [b]d[/] Dedup\n"
-                    "[b]w[/] Workspace  [b]n[/] Notify\n"
-                    "[b]g[/] Jadwal  [b]p[/] Pipeline\n"
-                    "[b]b[/] Baru  [b]c[/] Urut  [b]/[/] Cari  [b]r[/] Refresh\n"
-                    "[b]^t[/] Tema  [b]?[/] Bantuan  [b]q[/] Keluar",
-                    id="menu", classes="title")
+                yield Static("[b]Filter platform[/b]\n[dim]ketik / untuk cari nama/scope[/]", classes="title")
             with Vertical(id="tablewrap"):
                 yield DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
             yield VerticalScroll(Static("pilih program →", id="detail"))
@@ -1480,12 +1470,6 @@ class BBTUI(App):
         cur = str(self.cfg.get("sort", "platform"))
         self.cfg["sort"] = order[(order.index(cur) + 1) % len(order)] if cur in order else "quiet"
         save_cfg(self.cfg); self.notify(f"urut: {self.cfg['sort']}"); self._render()
-    def action_theme(self):
-        try: self.theme = "textual-light" if self.theme == "textual-dark" else "textual-dark"
-        except Exception:
-            try: self.dark = not self.dark
-            except Exception: pass
-        self.notify(f"tema: {getattr(self, 'theme', 'dark' if getattr(self,'dark',True) else 'light')}")
     def action_help(self): self.push_screen(HelpScreen())
     def action_external(self):
         pr = self._selected(); self.push_screen(ExternalToolsScreen(self.cfg, apex(pr) if pr else ""))
