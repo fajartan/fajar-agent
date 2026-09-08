@@ -491,7 +491,7 @@ ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
-#chatwrap { width: 92%; height: 90%; border: round $accent; background: $panel; }
+#chatwrap { width: 100%; height: 100%; background: $surface; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatlog { height: 1fr; padding: 0 1; background: $surface; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
