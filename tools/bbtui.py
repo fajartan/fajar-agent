@@ -1064,8 +1064,26 @@ class LlmChatScreen(ModalScreen):
         msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", RichLog)
         if not msgs: log.write("[yellow]tak ada sesi tersimpan.[/]"); return
         self.messages = msgs
-        last = next((x for x in reversed(msgs) if isinstance(x.get("content"), str)), None)
-        log.write(f"[green]✔ sesi di-resume[/] ({len(msgs)} pesan). Ketik 'lanjut' utk teruskan." + (f"\n[dim]terakhir: {str(last.get('content'))[:120]}[/]" if last else ""))
+        log.write("\n[dim]" + "─" * 60 + "[/]")
+        log.write(f"[b green]💾 SESI DILANJUTKAN[/] ({len(msgs)} pesan) — riwayat di bawah, tinggal terus ketik:")
+        self._render_history(msgs)
+        log.write("[dim]" + "─" * 60 + "[/]")
+    def _render_history(self, msgs):
+        from rich.markup import escape
+        log = self.query_one("#chatlog", RichLog)
+        for msg in msgs:
+            role = msg.get("role"); c = msg.get("content")
+            if role == "user" and isinstance(c, str):
+                if c.startswith("[TARGET CONTEXT]") or c.startswith("[ARTEFAK"):
+                    log.write("[dim]  · (konteks target dimuat)[/]"); continue
+                log.write(f"\n[b green]▶ kamu[/]\n  {escape(c[:1500])}")
+            elif role == "assistant":
+                text = ""
+                if isinstance(c, list): text = "".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+                elif isinstance(c, dict): text = c.get("content") or ""
+                elif isinstance(c, str): text = c
+                if text.strip(): self._write_agent(text)
+            # pesan tool/tool_result (internal) dilewati agar transkrip bersih
     # ---- slash commands ----
     def _slash(self, raw):
         log = self.query_one("#chatlog", RichLog)
