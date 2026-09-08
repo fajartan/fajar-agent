@@ -910,8 +910,8 @@ def _md_line(raw):
         s = _re.sub(r"(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)", r"[i]\1[/]", s)
         s = _re.sub(r"`([^`]+)`", r"[cyan]\1[/]", s)
         return s
-    if hashes and st[hashes:hashes + 1] == " ":            # heading → tebal berwarna, tanpa '#'
-        return ("[b yellow]" if hashes <= 2 else "[b]") + inline(escape(st[hashes:].strip())) + "[/]"
+    if hashes and st[hashes:hashes + 1] == " ":            # heading → tebal polos (tenang), tanpa '#'
+        return "[b]" + inline(escape(st[hashes:].strip())) + "[/]"
     # bullet rapi
     body = escape(raw)
     body = _re.sub(r"^(\s*)[-*]\s+", r"\1• ", body)
@@ -1242,36 +1242,46 @@ class LlmChatScreen(ModalScreen):
     def _is_sep(l):
         s = l.strip().strip("|")
         return bool(s) and all(set(c.strip()) <= set("-:") and c.strip() for c in s.split("|"))
-    def _write_table(self, log, rows):
+    def _build_table(self, rows):
         from rich.table import Table
         from rich.markup import escape
         cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
         hdr = cells(rows[0])
-        t = Table(show_header=True, header_style="bold cyan", border_style="dim", pad_edge=False, expand=False)
+        t = Table(show_header=True, header_style="bold", border_style="grey50", pad_edge=False, expand=False)
         for h in hdr: t.add_column(escape(h) or " ")
         for r in rows[1:]:
             cs = (cells(r) + [""] * len(hdr))[:len(hdr)]
             t.add_row(*[escape(c) for c in cs])
-        log.write(t)
+        return t
     def _write_agent(self, body):
+        # jawaban agent DALAM KOTAK (panel); proses tool tetap di luar (dim). Warna tenang.
+        from rich.panel import Panel
+        from rich.console import Group
+        from rich.text import Text
         log = self.query_one("#chatlog", RichLog)
-        log.write("\n[b cyan]🤖 agent[/]")
-        lines = body.splitlines(); n = len(lines); i = 0; para = []
+        parts = []; lines = body.splitlines(); n = len(lines); i = 0; para = []
         def flush():
-            for ln in para:
-                if not ln.strip(): log.write("")
-                elif "CHECKPOINT" in ln: log.write(f"  [black on cyan] {ln.strip().lstrip('#').strip()} [/]")
-                else: log.write("  " + _md_line(ln))
-            para.clear()
+            if not para: return
+            t = Text()
+            for k, ln in enumerate(para):
+                if k: t.append("\n")
+                if "CHECKPOINT" in ln:
+                    t.append("➤ " + ln.strip().lstrip("#").strip(), style="bold cyan")
+                else:
+                    try: t.append_text(Text.from_markup(_md_line(ln)))
+                    except Exception: t.append(ln)
+            parts.append(t); para.clear()
         while i < n:
             if self._is_row(lines[i]) and i + 1 < n and self._is_sep(lines[i + 1]):
-                flush()
-                j = i + 2
+                flush(); j = i + 2
                 while j < n and self._is_row(lines[j]) and not self._is_sep(lines[j]): j += 1
-                self._write_table(log, [lines[i]] + lines[i + 2:j]); i = j
+                parts.append(self._build_table([lines[i]] + lines[i + 2:j])); i = j
             else:
                 para.append(lines[i]); i += 1
         flush()
+        inner = Group(*parts) if parts else Text("")
+        log.write("")
+        log.write(Panel(inner, title="🤖 agent", title_align="left", border_style="cyan", padding=(0, 1)))
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
