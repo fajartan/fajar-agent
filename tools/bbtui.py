@@ -1217,6 +1217,43 @@ class LlmChatScreen(ModalScreen):
             log.write(f"\n[b green]📎 upload[/] {cand}"); self._ingest_path(cand); return
         log.write(f"\n[b green]▶ kamu[/]\n  {text}")
         self._send(text)
+    # ---- render jawaban agent: prosa rapi + tabel markdown jadi Rich Table ----
+    @staticmethod
+    def _is_row(l): return l.strip().count("|") >= 2
+    @staticmethod
+    def _is_sep(l):
+        s = l.strip().strip("|")
+        return bool(s) and all(set(c.strip()) <= set("-:") and c.strip() for c in s.split("|"))
+    def _write_table(self, log, rows):
+        from rich.table import Table
+        from rich.markup import escape
+        cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
+        hdr = cells(rows[0])
+        t = Table(show_header=True, header_style="bold cyan", border_style="dim", pad_edge=False, expand=False)
+        for h in hdr: t.add_column(escape(h) or " ")
+        for r in rows[1:]:
+            cs = (cells(r) + [""] * len(hdr))[:len(hdr)]
+            t.add_row(*[escape(c) for c in cs])
+        log.write(t)
+    def _write_agent(self, body):
+        log = self.query_one("#chatlog", RichLog)
+        log.write("\n[b cyan]🤖 agent[/]")
+        lines = body.splitlines(); n = len(lines); i = 0; para = []
+        def flush():
+            for ln in para:
+                if not ln.strip(): log.write("")
+                elif "CHECKPOINT" in ln: log.write(f"  [black on cyan] {ln.strip().lstrip('#').strip()} [/]")
+                else: log.write("  " + _md_line(ln))
+            para.clear()
+        while i < n:
+            if self._is_row(lines[i]) and i + 1 < n and self._is_sep(lines[i + 1]):
+                flush()
+                j = i + 2
+                while j < n and self._is_row(lines[j]) and not self._is_sep(lines[j]): j += 1
+                self._write_table(log, [lines[i]] + lines[i + 2:j]); i = j
+            else:
+                para.append(lines[i]); i += 1
+        flush()
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
@@ -1244,11 +1281,7 @@ class LlmChatScreen(ModalScreen):
             self.app.call_from_thread(self._refresh_bars)
         def emit(kind, body):
             if kind == "llm":
-                w("\n[b cyan]🤖 agent[/]")
-                for ln in body.splitlines():
-                    if not ln.strip(): w("")
-                    elif "CHECKPOINT" in ln: w(f"  [black on cyan] {ln.strip().lstrip('#').strip()} [/]")
-                    else: w("  " + _md_line(ln))
+                self.app.call_from_thread(self._write_agent, body)   # render prosa + TABEL rapi
             elif kind == "tool":
                 nm = body.split(" ", 1)[0]; arg = body.split(" ", 1)[1] if " " in body else ""
                 from rich.markup import escape as _e
