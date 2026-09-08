@@ -303,44 +303,70 @@ def fetch_h1_private(cfg, have_keys, cap=60):
 def _bearer(tok):
     return {"Authorization": "Bearer " + tok, "Accept": "application/json"} if tok else None
 
-def fetch_intigriti_private(cfg, have_keys, cap=60):
-    """Program yg bisa diakses akun Intigriti (termasuk PRIVATE) via Personal Access Token. EKSPERIMENTAL (verifikasi dgn token)."""
+def _intigriti_detail(handle, hdr):
+    try:
+        d = json.loads(_get(f"https://api.intigriti.com/external/researcher/v1/programs/{handle}", headers=hdr, timeout=30))
+        doms = d.get("domains") or d.get("inScope") or d.get("scope") or []
+        ids = []
+        for x in doms:
+            v = x if isinstance(x, str) else (x.get("endpoint") or x.get("value") or x.get("url") or x.get("identifier") or "")
+            if v: ids.append(v)
+        return ids, [i for i in ids if is_wild(i)]
+    except Exception:
+        return [], []
+
+def fetch_intigriti_private(cfg, have_keys, cap=50):
+    """Program akun Intigriti (termasuk PRIVATE) + scope via Personal Access Token. EKSPERIMENTAL."""
     tok = cfg.get("intigriti_api_token")
     if not tok: return {}, None
-    out = {}
+    hdr = _bearer(tok); out = {}
     try:
-        d = json.loads(_get("https://api.intigriti.com/external/researcher/v1/programs?limit=500", headers=_bearer(tok), timeout=45))
+        d = json.loads(_get("https://api.intigriti.com/external/researcher/v1/programs?limit=500", headers=hdr, timeout=45))
         items = d if isinstance(d, list) else (d.get("records") or d.get("data") or d.get("items") or [])
         for it in items:
             handle = it.get("handle") or it.get("id") or it.get("programId") or it.get("name")
             if not handle: continue
             key = f"it|{handle}"
             if key in have_keys or key in out: continue
+            scope, wild = _intigriti_detail(handle, hdr)
             url = it.get("webLink") or it.get("url") or f"https://app.intigriti.com/researcher/programs/{handle}"
             out[key] = dict(platform="intigriti", key=key, name="🔒 " + str(it.get("name") or handle), url=url,
                             bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", managed=None,
-                            eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (Intigriti token)", scope=[], wild=[])
+                            eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (Intigriti token)",
+                            scope=scope, wild=wild)
             if len(out) >= cap: break
         return out, None
     except Exception as e:
         return out, f"intigriti-api: {e}"
 
-def fetch_ywh_private(cfg, have_keys, cap=60):
-    """Program PRIVATE yg bisa diakses akun YesWeHack via token JWT (public sudah dari data publik)."""
+def _ywh_detail(slug, hdr):
+    try:
+        d = json.loads(_get("https://api.yeswehack.com/programs/" + slug, headers=hdr, timeout=30))
+        scs = d.get("scopes") or []
+        scope = [s.get("scope") for s in scs if s.get("scope")]
+        wild = [s.get("scope") for s in scs if s.get("scope") and is_wild(s.get("scope"))]
+        return scope, wild, d.get("bounty_reward_min"), d.get("bounty_reward_max")
+    except Exception:
+        return [], [], None, None
+
+def fetch_ywh_private(cfg, have_keys, cap=50):
+    """Program PRIVATE akun YesWeHack + scope via token (public sudah dari data publik)."""
     tok = cfg.get("yeswehack_api_token")
     if not tok: return {}, None
-    out = {}
+    hdr = _bearer(tok); out = {}
     try:
-        d = json.loads(_get("https://api.yeswehack.com/programs?limit=100", headers=_bearer(tok), timeout=45))
+        d = json.loads(_get("https://api.yeswehack.com/programs?limit=100", headers=hdr, timeout=45))
         for it in (d.get("items") or []):
             slug = it.get("slug")
-            if not slug or it.get("public"): continue   # yg publik sudah tercakup; ambil yg PRIVATE
+            if not slug or it.get("public"): continue   # publik sudah tercakup; ambil PRIVATE
             key = f"ywh|{slug}"
             if key in have_keys or key in out: continue
+            scope, wild, bmin, bmax = _ywh_detail(slug, hdr)
             out[key] = dict(platform="yeswehack", key=key, name="🔒 " + (it.get("title") or slug),
-                            url=f"https://yeswehack.com/programs/{slug}", bounty=bool(it.get("bounty")), bounty_min=None,
-                            bounty_max=None, cur="$", maxsev="-", managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
-                            signal="PRIVATE/accessible (YWH token)", scope=[], wild=[])
+                            url=f"https://yeswehack.com/programs/{slug}", bounty=bool(it.get("bounty")),
+                            bounty_min=(bmin or None), bounty_max=(bmax or None), cur="$", maxsev="-", managed=None,
+                            eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (YWH token)",
+                            scope=scope, wild=wild)
             if len(out) >= cap: break
         return out, None
     except Exception as e:
