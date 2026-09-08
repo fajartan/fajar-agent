@@ -222,8 +222,9 @@ def _num(cfg, k):
 
 def passes(pr, cfg):
     if not pr["bounty"]: return False
-    _priv = "PRIVATE" in str(pr.get("signal", ""))   # program private via token = selalu tampil (tak butuh wildcard)
-    if cfg["require_wildcard"] and not pr["wild"] and not _priv: return False
+    # program private (token) & disclose (VDP/independen, tak punya wildcard) = selalu tampil walau wildcard wajib
+    _relax = "PRIVATE" in str(pr.get("signal", "")) or pr.get("platform") == "disclose"
+    if cfg["require_wildcard"] and not pr["wild"] and not _relax: return False
     if cfg["min_bounty"] and pr["bounty_max"] is not None and pr["bounty_max"] < cfg["min_bounty"]: return False
     af = [x for x in str(cfg.get("asset_type", "")).lower().replace(" ", "").split(",") if x]
     if af:
