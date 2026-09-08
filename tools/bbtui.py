@@ -1076,8 +1076,11 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "model":
             if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]model → {arg}[/]")
             else: self.action_pick_model()
-        elif cmd == "provider" and arg in ("anthropic", "openai"):
-            self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider → {arg}[/]")
+        elif cmd == "provider":
+            if arg in ("anthropic", "openai"):
+                self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider → {arg}[/]")
+            else:
+                log.write(f"[yellow]provider sekarang: {self.cfg.get('llm_provider','anthropic')}. Pakai: /provider anthropic | openai[/]")
         elif cmd in ("new", "reset"):
             self.messages = None; self.tok_in = self.tok_out = self.turns = 0; self.ctx = 0; self.t0 = None; self._refresh_bars()
             if self.target:   # sesi baru tetap bawa scope target
@@ -1160,12 +1163,15 @@ class LlmChatScreen(ModalScreen):
         if box is None: return
         v = ev.value
         if v.startswith("/"):
-            q = v[1:].lower()
+            q = v[1:].split()[0].lower() if len(v) > 1 else ""
             box.clear_options()
+            name_hits, desc_hits = [], []
             for c, d in SLASH_HELP:
                 cmd = c.split()[0]                      # token perintah, mis. /model
-                if q in cmd.lower() or q in d.lower():
-                    box.add_option(Option(f"{c}  —  {d}", id=cmd))
+                if q in cmd[1:].lower(): name_hits.append((c, d, cmd))   # match NAMA command dulu
+                elif q in d.lower(): desc_hits.append((c, d, cmd))       # baru deskripsi
+            for c, d, cmd in name_hits + desc_hits:
+                box.add_option(Option(f"{c}  —  {d}", id=cmd))
             if box.option_count:
                 box.add_class("on"); box.highlighted = 0
             else:
@@ -1191,8 +1197,13 @@ class LlmChatScreen(ModalScreen):
     def on_option_list_option_selected(self, ev):   # klik mouse pada opsi
         if ev.option_list.id == "slashbox": self._fill_slash(run=True)
     def on_input_submitted(self, ev):
-        if self._slash_box() and self._slash_box().has_class("on"):   # palette aktif → Enter = pilih & jalankan
-            self._fill_slash(run=True); return
+        box = self._slash_box()
+        if box and box.has_class("on"):   # palette aktif
+            val = ev.value.strip(); tok = val.split()[0].lower() if val else ""
+            known = {c.split()[0] for c, _d in SLASH_HELP}
+            if tok in known:                       # yg diketik PERSIS sebuah command → jalankan itu (+ argnya)
+                ev.input.value = ""; box.remove_class("on"); self._slash(val); return
+            self._fill_slash(run=True); return     # cuma prefix → jalankan yg ter-highlight (arrow utk pilih)
         text = ev.value.strip(); ev.input.value = ""
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
