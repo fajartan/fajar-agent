@@ -1,0 +1,26 @@
+# === Riset target PRIBADI — jangan pernah publish ===
+HASIL-RISET.md
+semrush-playbook.md
+smtp2go-playbook.md
+varonis-deep-dive-plan.md
+whatnot-deep-dive-plan.md
+whatnot-operator-prompt.md
+dossier/
+deep-dive-webapp-2026-09-07/
+recon-varonis/
+recon-whatnot/
+shortlist-2026-09-06/
+harvest.mjs
+
+# === duplikat lama di root (yg dipakai ada di tools/) ===
+/bbtui.py
+/daily-target-finder.py
+
+# === artefak/junk ===
+__pycache__/
+*.pyc
+tools/__pycache__/
+tools/translate_pdf_layout.py
+tools/test_stub.pdf
+tools/*.png
+tools/*.pdf

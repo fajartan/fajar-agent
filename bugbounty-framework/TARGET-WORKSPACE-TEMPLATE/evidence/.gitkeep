@@ -1,0 +1,5 @@
+# Simpan bukti per-finding di sini.
+# Konvensi nama: <ID-hipotesis>-<deskripsi>.<ext>  (mis. H001-req-userB.txt, H001-resp.png)
+# Tiap bukti idealnya mengandung: request penuh, response, timestamp, label akun (userA/userB), catatan.
+# Redaksi PII/secret pihak ketiga sebelum dipakai di laporan.
+
