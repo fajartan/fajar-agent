@@ -21,4 +21,3 @@
 | ID | Kelas bug | Severity (sementara) | Bukti | Anti-dup dicek? | Status |
 |---|---|---|---|---|---|
 | H001 | <IDOR/XSS/...> | <low/med/high> | evidence/... | ya/tidak | draft |
-

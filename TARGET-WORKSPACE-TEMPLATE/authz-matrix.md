@@ -20,4 +20,3 @@ Objek: **<mis. Document / Order / Team / Invoice>**
 ## Catatan uji
 - Metode 2-akun: A buat objek + capture request → B replay dgn ID objek A (dua arah A→B, B→A).
 - Uji juga vertical (member → fungsi admin) & missing function-level (UI sembunyi, API terima).
-

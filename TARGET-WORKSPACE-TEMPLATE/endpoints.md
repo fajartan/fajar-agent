@@ -12,4 +12,3 @@
 - Backend: <PHP/Node/Python/...> → kelas bug prioritas: <...>
 - Frontend: <React/Vue/Angular> · API: <REST/GraphQL>
 - Versi/library menarik: <mis. Redoc 2.5.0>
-

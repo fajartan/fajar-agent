@@ -24,4 +24,3 @@
 - Onboarding/verifikasi email selesai? <...>
 - Program mengizinkan akun admin/tim? <cek scope.md>
 - Token/session disimpan aman (password manager), tidak pernah masuk ke laporan mentah / evidence tanpa redaksi.
-

@@ -23,4 +23,3 @@ Kerangka kerja **per-target**. Salin folder ini menjadi `<nama-target>/` (mis. `
 ```
 
 Terkait: [[FRAMEWORK-BUGBOUNTY-AI]] Bab 8 · [[AI-OPERATING-RULES]] · [[RECON-RUNBOOK]] · [[VERIFY-BEFORE-SUBMIT]]
-

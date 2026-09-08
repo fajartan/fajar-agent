@@ -23,4 +23,3 @@
 
 ## Verifikasi SCOPE-GATE terakhir
 - Tanggal: <...> | verdict: <PASS/STOP> | catatan: <...>
-

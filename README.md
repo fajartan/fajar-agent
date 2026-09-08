@@ -21,32 +21,18 @@ fajar llm -i     # agent chat bertahap    ·    fajar find    ·    fajar telegr
 ```
 > Ganti `fajartan/fajar-agent` dengan repo GitHub-mu (atau host `install.sh`/`install.ps1` di domain sendiri). `curl|sh` & `irm|iex` mengeksekusi skrip dari internet — sama seperti installer harness lain; pastikan sumber tepercaya.
 
-### Alternatif — self-extract manual
+### Alternatif — git clone (jalan langsung, tanpa build)
 ```bash
-curl -sL https://raw.githubusercontent.com/fajartan/fajar-agent/main/setup-bugbounty.sh | bash
-cd bugbounty-framework && python3 bb.py
-```
-`--docs-only` untuk memasang dokumen saja tanpa toolchain.
-
-### Opsi 2 — git clone (Linux/macOS/WSL)
-```bash
-git clone https://github.com/fajartan/fajar-agent.git
-cd fajar-agent && bash setup-bugbounty.sh
-python3 bb.py
-```
-
-### Opsi 3 — Windows PowerShell
-```powershell
 git clone https://github.com/fajartan/fajar-agent.git
 cd fajar-agent
-powershell -ExecutionPolicy Bypass -File setup-bugbounty.ps1
-python bb.py
+pip install --user textual rich
+python3 bb.py          # Windows: python bb.py
 ```
-Inti FAJAR-AGENT = Python murni, jalan di **terminal apa pun** (PowerShell/CMD Windows, bash/zsh Linux/macOS). TUI, finder, LLM agent, Telegram, MCP native lintas-OS. Toolchain recon aktif (subfinder/nuclei/dll) berbasis Linux — di Windows pakai WSL untuk itu.
+Repo ini **flat** — `bb.py` + `tools/` + dokumen langsung di root; tak ada langkah build/extract. Inti FAJAR-AGENT = Python murni, jalan di **terminal apa pun** (PowerShell/CMD Windows, bash/zsh Linux/macOS). TUI, finder, LLM agent, Telegram, MCP native lintas-OS. Toolchain recon aktif (subfinder/nuclei/dll) berbasis Linux — di Windows pakai WSL.
 
 ### Kebutuhan
 - Python 3.8+ (inti pakai stdlib). TUI butuh `textual` (`pip install --user textual`; Linux: tambah `--break-system-packages` bila perlu).
-- Toolchain recon (subfinder/httpx/nuclei/dll) dipasang otomatis oleh installer (best-effort, Linux).
+- Toolchain recon (subfinder/httpx/nuclei/dll): pasang manual (lihat `RECON-RUNBOOK.md`) — opsional; agent tetap jalan tanpanya.
 - LLM agent butuh API key provider (Anthropic / OpenAI-compatible: Groq/OpenRouter/Ollama).
 
 ## Pakai
@@ -66,4 +52,4 @@ Di TUI: `l` = FAJAR-AGENT chat (slash `/help`, `/yolo`, `/model`, `/resume`, `/s
 - **Finder 5 platform** (HackerOne/Bugcrowd/YesWeHack/Intigriti/Federacy) + skor QUIET anti-ramai + deteksi program baru.
 - **Recon/monitor/dedup**, pipeline cron harian, integrasi ~40 ext-tool (nuclei/burp/sqlmap/ffuf/…).
 
-Dibangun ulang dari sumber via `python build_framework.py` (sinkron folder + installer + zip).
+Struktur repo flat: `bb.py`, `tools/`, dokumen `.md`, `TARGET-WORKSPACE-TEMPLATE/`, `install.sh`, `install.ps1`.

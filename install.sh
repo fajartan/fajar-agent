@@ -1,14 +1,13 @@
 #!/usr/bin/env sh
 #  FAJAR-AGENT web installer (macOS / Linux).
-#  Pakai:  curl -fsSL https://<HOST>/install.sh | sh
+#  Pakai:  curl -fsSL https://raw.githubusercontent.com/fajartan/fajar-agent/main/install.sh | sh
 #  Setelah itu cukup ketik:  fajar
-#  Ganti fajartan/fajar-agent (atau host sendiri) sebelum publikasi.
 set -eu
 
-REPO_RAW="${FAJAR_REPO:-https://raw.githubusercontent.com/fajartan/fajar-agent/main}"
+USER_REPO="${FAJAR_REPO:-fajartan/fajar-agent}"
+BRANCH="${FAJAR_BRANCH:-main}"
 DEST="${FAJAR_HOME:-$HOME/.fajar-agent}"
 BIN="$HOME/.local/bin"
-
 say() { printf "\033[33m==> %s\033[0m\n" "$1"; }
 
 # 1) Python
@@ -17,17 +16,20 @@ for c in python3 python; do command -v "$c" >/dev/null 2>&1 && { PY="$c"; break;
 [ -z "$PY" ] && { echo "[!] Python 3 tidak ada. Install dulu."; exit 1; }
 say "Python: $PY"
 
-# 2) unduh + ekstrak payload (self-extracting installer) ke $DEST
-say "mengunduh FAJAR-AGENT -> $DEST"
-mkdir -p "$DEST"
-if command -v curl >/dev/null 2>&1; then curl -fsSL "$REPO_RAW/setup-bugbounty.sh" -o "$DEST/setup.sh";
-elif command -v wget >/dev/null 2>&1; then wget -qO "$DEST/setup.sh" "$REPO_RAW/setup-bugbounty.sh";
+# 2) unduh arsip repo (flat, tanpa folder bersarang) -> $DEST
+say "mengunduh FAJAR-AGENT ($USER_REPO@$BRANCH) -> $DEST"
+TMP="$(mktemp -d)"
+URL="https://codeload.github.com/$USER_REPO/tar.gz/refs/heads/$BRANCH"
+if command -v curl >/dev/null 2>&1; then curl -fsSL "$URL" -o "$TMP/src.tgz";
+elif command -v wget >/dev/null 2>&1; then wget -qO "$TMP/src.tgz" "$URL";
 else echo "[!] butuh curl atau wget"; exit 1; fi
-( cd "$DEST" && sh setup.sh "$DEST" >/dev/null 2>&1 || bash setup.sh "$DEST" )
-
-BB="$DEST/bb.py"
-[ -f "$BB" ] || BB="$DEST/bugbounty-framework/bb.py"
-[ -f "$BB" ] || { echo "[!] bb.py tak ketemu setelah ekstrak"; exit 1; }
+mkdir -p "$DEST"
+tar -xzf "$TMP/src.tgz" -C "$TMP"
+SRC="$(find "$TMP" -maxdepth 1 -type d -name '*-*' | head -n1)"
+[ -d "$SRC" ] || SRC="$TMP/$(ls "$TMP" | grep -v src.tgz | head -n1)"
+cp -R "$SRC"/. "$DEST"/
+rm -rf "$TMP"
+[ -f "$DEST/bb.py" ] || { echo "[!] bb.py tak ketemu setelah unduh"; exit 1; }
 
 # 3) dependensi TUI (best-effort)
 "$PY" -m pip install --user --upgrade textual rich >/dev/null 2>&1 || \
@@ -37,7 +39,7 @@ BB="$DEST/bb.py"
 mkdir -p "$BIN"
 cat > "$BIN/fajar" <<EOF
 #!/usr/bin/env sh
-exec "$PY" "$BB" "\$@"
+exec "$PY" "$DEST/bb.py" "\$@"
 EOF
 chmod +x "$BIN/fajar"
 
@@ -54,3 +56,4 @@ echo ""
 say "SELESAI. Buka terminal baru, lalu ketik:  fajar"
 echo "    fajar             # TUI FAJAR-AGENT"
 echo "    fajar llm -i      # agent chat bertahap   |   fajar find   |   fajar telegram"
+echo "    fajar update      # (git pull bila di-clone) — atau jalankan installer lagi"
