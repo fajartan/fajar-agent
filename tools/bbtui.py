@@ -349,7 +349,9 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatlog { height: 1fr; padding: 0 1; background: $surface; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
-#chatinput { dock: bottom; border: tall $accent; }
+#chatbar { dock: bottom; height: 3; }
+#chatinput { width: 1fr; border: tall $accent; }
+#chatbar Button { height: 3; min-width: 8; margin: 0; }
 """
 
 BANNER = (
@@ -702,18 +704,73 @@ SLASH_HELP = [
     ("/add <path>", "upload/ingest file atau folder projek ke konteks (drag path juga bisa)"),
     ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
-    ("/status", "info kondisi agent"), ("/quit", "tutup chat"),
+    ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=⏹/esc)"),
+    ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
+
+def classify_assets(scope):
+    """Kelompokkan aset in-scope per jenis → menentukan skill & pendekatan."""
+    web, api, android, ios, other = [], [], [], [], []
+    for s in scope:
+        sl = str(s).lower()
+        if "play.google" in sl or sl.startswith("com.") or ".apk" in sl or "/android" in sl: android.append(s)
+        elif "apps.apple" in sl or "testflight" in sl or "itunes.apple" in sl or (sl.isdigit() and len(sl) >= 6): ios.append(s)
+        elif sl.startswith("api.") or "/api" in sl or ".api." in sl or "graphql" in sl: api.append(s)
+        elif "." in sl and " " not in sl: web.append(s)
+        else: other.append(s)
+    return {"web": web, "api": api, "android": android, "ios": ios, "other": other}
+
+def program_context(pr):
+    """SKEMA EKSTRAKSI: ubah 1 program → brief terstruktur utk LLM (sumber scope resmi + rute skill)."""
+    g = classify_assets(pr.get("scope", []))
+    present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
+    skill_map = {"web": "web-vuln-classes", "api": "api-pentest", "android": "mobile-pentest", "ios": "mobile-pentest"}
+    skills = sorted({skill_map[k] for k in present if k in skill_map}) or ["web-vuln-classes"]
+    L = ["[TARGET CONTEXT] — sumber scope RESMI dari TUI (jangan cari/riset ulang; jangan program_detail).",
+         f"nama       : {pr.get('name')}",
+         f"platform   : {pr.get('platform')}",
+         f"url_rules  : {pr.get('url','')}",
+         f"reward     : {reward(pr)}",
+         f"max_sev    : {pr.get('maxsev','-')}   managed: {pr.get('managed')}",
+         f"sinyal_h1  : {pr.get('signal','-')}",
+         f"jenis_aset : {', '.join(present) or '-'}",
+         f"skill_rute : {', '.join(skills)}  (muat via load_skill di tahap analisa/rencana)",
+         f"wildcard ({len(pr.get('wild',[]))}):"]
+    L += ["  - " + str(w) for w in pr.get("wild", [])[:40]] or ["  (tak ada)"]
+    for k in present:
+        L.append(f"aset {k} ({len(g[k])}):")
+        L += ["  - " + str(x) for x in g[k][:50]]
+        if len(g[k]) > 50: L.append(f"  … +{len(g[k])-50} lagi")
+    return "\n".join(L)
+
+def _md_line(raw):
+    """Konversi 1 baris markdown → Rich markup rapi (buang '#', **tebal**, `kode`); escape '[..]' agar [FAKTA] tak hilang."""
+    from rich.markup import escape
+    import re as _re
+    raw = raw.rstrip("\n")
+    st = raw.lstrip()
+    hashes = len(st) - len(st.lstrip("#"))
+    def inline(s):
+        s = _re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/]", s)
+        s = _re.sub(r"(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)", r"[i]\1[/]", s)
+        s = _re.sub(r"`([^`]+)`", r"[cyan]\1[/]", s)
+        return s
+    if hashes and st[hashes:hashes + 1] == " ":            # heading → tebal berwarna, tanpa '#'
+        return ("[b yellow]" if hashes <= 2 else "[b]") + inline(escape(st[hashes:].strip())) + "[/]"
+    # bullet rapi
+    body = escape(raw)
+    body = _re.sub(r"^(\s*)[-*]\s+", r"\1• ", body)
+    return inline(body)
 
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
-    BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+a", "toggle_active", "yolo"),
+    BINDINGS = [("escape", "soft_escape", "stop/keluar"), ("ctrl+a", "toggle_active", "yolo"),
                 ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear")]
-    def __init__(self, cfg, seed=""):
-        super().__init__(); self.cfg = cfg; self.seed = seed; self.messages = None
+    def __init__(self, cfg, target=None):
+        super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
-        self.ctx = 0; self.window = 0; self.compacts = 0
+        self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
     def compose(self) -> ComposeResult:
         _p, _m, _b, key = _llm_creds(self.cfg)
@@ -721,7 +778,10 @@ class LlmChatScreen(ModalScreen):
             yield Static(self._headerline(), id="chathdr")
             yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
             yield Static(self._statusline(), id="chatstatus")
-            yield Input(placeholder=("ketik goal atau /help  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+            with Horizontal(id="chatbar"):
+                yield Button("⏹", id="btnstop", variant="error")
+                yield Input(placeholder=("ketik goal atau /help  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+                yield Button("➤ Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
         yolo = "[black on yellow] ⚡YOLO [/]" if self.allow_gated else "[dim]aktif:off[/]"
@@ -740,9 +800,13 @@ class LlmChatScreen(ModalScreen):
         dot = {"idle": "[green]●[/]", "checkpoint": "[yellow]⏸[/]", "auto-compact": "[magenta]⟳[/]"}.get(self.activity, "[cyan]◉[/]")
         act = "idle" if not self.busy and self.activity in ("idle", "checkpoint") else self.activity
         tok = f"⇅ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
+        tps = ""
+        if self.t0:
+            el = (datetime.datetime.now() - self.t0).total_seconds()
+            if el > 0: tps = f"  │  {el:.0f}s · {self.tok_out/el:.0f} t/s"
         cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
-        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok  │  giliran {self.turns}{cmp}  │  "
-                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/help · ctrl+a yolo[/]")
+        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{tps}  │  giliran {self.turns}{cmp}  │  "
+                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/help·⏹stop·/quit[/]")
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
@@ -779,11 +843,43 @@ class LlmChatScreen(ModalScreen):
         log.write("\n[cyan]Alur bertahap:[/] pilih target → recon → analisa/hipotesis → rencana → verifikasi → draf laporan → [b]submit=kamu[/]")
         log.write("[cyan]✦ Tip:[/] tiap tahap berhenti di CHECKPOINT — ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
         if not key: log.write("\n[red]⚠ belum ada API key.[/] Settings (s) → blok LLM AGENT, atau `bb.py llm --setup`.")
-        elif self.seed: log.write(f"\n[b green]▶ kamu[/]\n  {self.seed}")
+        # --- TARGET terpilih: suntik konteks scope resmi (skema ekstraksi) ---
+        inp = self.query_one("#chatinput", Input)
+        if self.target and key:
+            ctx = program_context(self.target)
+            self.messages = la.new_messages(prov == "anthropic")
+            self.messages.append({"role": "user", "content": ctx})   # sumber scope resmi utk model
+            g = classify_assets(self.target.get("scope", []))
+            present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
+            log.write(f"\n[b green]🎯 TARGET:[/] [b]{self.target.get('name')}[/] [{self.target.get('platform')}]  "
+                      f"· aset: {', '.join(present) or '-'}  · wildcard: {len(self.target.get('wild',[]))}  · sev: {self.target.get('maxsev','-')}")
+            log.write("[dim]scope resmi sudah dimuat ke konteks agent (tidak perlu cari ulang).[/]")
+            inp.value = f"Mulai SCOPE-GATE untuk {self.target.get('name')} pakai TARGET CONTEXT, lalu susun rencana hunting bertahap sesuai jenis aset."
+            log.write("[dim]💡 goal terisi di bawah — tekan Kirim/Enter untuk mulai (tidak jalan otomatis).[/]")
+        log.write("\n[dim]➤ Kirim (atau Enter) untuk mulai · ⏹/esc stop · keluar: /quit[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
-        self.query_one("#chatinput", Input).focus()
-        if self.seed and key: self._send(self.seed)
+        inp.focus()
+    # ---- actions ----
+    def on_button_pressed(self, ev):
+        if ev.button.id == "btnsend":
+            inp = self.query_one("#chatinput", Input); v = inp.value.strip(); inp.value = ""
+            if v: self._submit(v)
+        elif ev.button.id == "btnstop":
+            self.action_stop()
+    def action_stop(self):
+        log = self.query_one("#chatlog", RichLog)
+        if not self.busy:
+            log.write("[dim]tak ada proses berjalan.[/]"); return
+        try:
+            if self._worker is not None: self._worker.cancel()
+        except Exception: pass
+        self.busy = False; self.activity = "idle"; self._refresh_bars()
+        log.write("[yellow]⏹ dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
+    def action_soft_escape(self):
+        # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan pakai /quit
+        if self.busy: self.action_stop()
+        else: self.query_one("#chatlog", RichLog).write("[dim]untuk keluar sesi chat, ketik [b]/quit[/] (esc tidak menutup agar tak sengaja keluar).[/]")
     # ---- actions ----
     def action_toggle_active(self):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
@@ -849,8 +945,11 @@ class LlmChatScreen(ModalScreen):
             if not self.messages or len(self.messages) < 3: log.write("[yellow]konteks masih pendek.[/]"); return
             p, mdl, base, k = _llm_creds(self.cfg)
             log.write("[magenta]⟳ meringkas konteks…[/]"); self._do_compact(p, mdl, base, k)
-        elif cmd == "stage": self._send("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
-        elif cmd in ("quit", "exit", "q"): self.app.pop_screen()
+        elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
+        elif cmd == "stop": self.action_stop()
+        elif cmd in ("quit", "exit", "q", "keluar"):
+            if self.busy: self.action_stop()
+            log.write("[dim]keluar sesi chat…[/]"); self.app.pop_screen()
         else: log.write(f"[yellow]perintah '/{cmd}' tak dikenal. /help utk daftar.[/]")
     @work(thread=True)
     def _mcp_connect(self):
@@ -875,22 +974,23 @@ class LlmChatScreen(ModalScreen):
         log.write(f"[green]📎 ditambahkan ke konteks:[/] {label} [dim]({len(content)} char)[/]. "
                   "Beri instruksi (mis. 'cari endpoint & secret di artefak ini').")
     def on_input_submitted(self, ev):
-        text = ev.value.strip()
-        if not text or self.busy: return
-        ev.input.value = ""
-        if text.startswith("/"): self._slash(text); return
-        # drag-drop / upload: bila input adalah path file/folder yg ada → ingest
-        cand = text.strip().strip('"').strip("'")
+        text = ev.value.strip(); ev.input.value = ""
+        if text: self._submit(text)
+    def _submit(self, text):
+        log = self.query_one("#chatlog", RichLog)
+        if text.startswith("/"): self._slash(text); return          # slash SELALU jalan (walau sibuk)
+        if self.busy:
+            log.write("[yellow]⏳ agent masih memproses — tunggu CHECKPOINT, atau tekan ⏹/esc untuk stop.[/]"); return
+        cand = text.strip().strip('"').strip("'")                   # drag-drop path → ingest
         if (os.sep in cand or cand.startswith("~")) and os.path.exists(os.path.expanduser(cand)):
-            self.query_one("#chatlog", RichLog).write(f"\n[b green]📎 upload[/] {cand}")
-            self._ingest_path(cand); return
-        self.query_one("#chatlog", RichLog).write(f"\n[b green]▶ kamu[/]\n  {text}")
+            log.write(f"\n[b green]📎 upload[/] {cand}"); self._ingest_path(cand); return
+        log.write(f"\n[b green]▶ kamu[/]\n  {text}")
         self._send(text)
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
-        self.busy = True; self.activity = "berpikir"; self.turns += 1; self._refresh_bars()
-        self._run_stage(text, prov, model, base, key)
+        self.busy = True; self.activity = "berpikir"; self.turns += 1; self.t0 = datetime.datetime.now(); self._refresh_bars()
+        self._worker = self._run_stage(text, prov, model, base, key)
     @work(thread=True)
     def _do_compact(self, prov, model, base, key):
         la = _llm_mod(); log = self.query_one("#chatlog", RichLog)
@@ -914,13 +1014,20 @@ class LlmChatScreen(ModalScreen):
             if kind == "llm":
                 w("\n[b cyan]🤖 agent[/]")
                 for ln in body.splitlines():
-                    if "CHECKPOINT" in ln: w(f"  [black on cyan] {ln.strip()} [/]")
-                    else: w(f"  {ln}")
-            elif kind == "tool": w(f"  [yellow]⚙[/] [b]{body.split(' ',1)[0]}[/] [dim]{body.split(' ',1)[1] if ' ' in body else ''}[/]")
+                    if not ln.strip(): w("")
+                    elif "CHECKPOINT" in ln: w(f"  [black on cyan] {ln.strip().lstrip('#').strip()} [/]")
+                    else: w("  " + _md_line(ln))
+            elif kind == "tool":
+                nm = body.split(" ", 1)[0]; arg = body.split(" ", 1)[1] if " " in body else ""
+                from rich.markup import escape as _e
+                w(f"  [yellow]⚙[/] [b]{nm}[/] [dim]{_e(arg[:120])}[/]")
             elif kind == "result":
-                snip = body[:700] + (" …[terpotong]" if len(body) > 700 else "")
-                w("  [dim]" + snip.replace("\n", "\n  ") + "[/]")
-            else: w(f"[red]⚠ {body}[/]")
+                from rich.markup import escape as _e
+                lines = body.splitlines()[:14]
+                w("  [dim]" + "\n  ".join(_e(l[:160]) for l in lines) + ("\n  …" if len(body.splitlines()) > 14 else "") + "[/]")
+            else:
+                from rich.markup import escape as _e
+                w(f"[red]⚠ {_e(body)}[/]")
         try:
             la = _llm_mod()
             if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
@@ -930,7 +1037,7 @@ class LlmChatScreen(ModalScreen):
         except Exception as e:
             w(f"[red]⚠ error: {e}[/]")
         finally:
-            self.busy = False; self.activity = "idle"
+            self.busy = False; self.activity = "idle"; self._worker = None
             self.app.call_from_thread(self._refresh_bars)
             self.app.call_from_thread(lambda: self.query_one("#chatinput", Input).focus())
 
@@ -1076,9 +1183,7 @@ class BBTUI(App):
     def action_schedule(self):
         self.push_screen(SchedulerScreen())
     def action_llm(self):
-        pr = self._selected()
-        seed = f"Mulai hunting bertahap untuk program {pr['name']}: mulai tahap SCOPE-GATE + pilih target." if pr else ""
-        self.push_screen(LlmChatScreen(self.cfg, seed))
+        self.push_screen(LlmChatScreen(self.cfg, target=self._selected()))
     def action_recon(self):
         pr = self._selected(); self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
     def action_monitor(self):
