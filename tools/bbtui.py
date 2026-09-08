@@ -981,6 +981,17 @@ class LlmChatScreen(ModalScreen):
         cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
         return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  giliran {self.turns}{cmp}  │  "
                 f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
+    @work(thread=True)
+    def _load_window(self):
+        prov, model, base, key = _llm_creds(self.cfg)
+        if not key: return
+        try:
+            w = _llm_mod().fetch_context_window(prov, model, key, base)
+            if w and w > 0:
+                self.window = w
+                self.app.call_from_thread(self._refresh_bars)
+        except Exception:
+            pass
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
@@ -1002,8 +1013,9 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", RichLog)
         prov, model, _b, key = _llm_creds(self.cfg)
         la = _llm_mod()
-        self.window = la.model_window(model)          # ctx bar langsung tampil (0/window) sejak awal
+        self.window = la.model_window(model)          # tebakan awal biar ctx bar langsung tampil
         self.set_interval(0.7, self._tick)            # jam sesi + animasi "loading" saat nunggu LLM
+        self._load_window()                           # ambil window ASLI model dari provider (async)
         # --- banner + identitas harness ---
         log.write(AGENT_BANNER)
         log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  ·  {AGENT_TAGLINE}")
@@ -1090,7 +1102,8 @@ class LlmChatScreen(ModalScreen):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
         self.query_one("#chatlog", RichLog).write(f"[b]{'🟢 YOLO ON — aksi kirim-traffic diizinkan' if self.allow_gated else '🔴 YOLO OFF — aksi aktif ditolak'}[/]")
     def action_pick_model(self):
-        self.app.push_screen(ModelPickerScreen(self.cfg, lambda mdl: self._refresh_bars()))
+        def picked(mdl): self._refresh_bars(); self._load_window()   # window ikut model baru
+        self.app.push_screen(ModelPickerScreen(self.cfg, picked))
     def action_clear(self):
         self.query_one("#chatlog", RichLog).clear(); self.query_one("#chatlog", RichLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
     def action_resume(self):
@@ -1125,7 +1138,7 @@ class LlmChatScreen(ModalScreen):
             log.write("[b cyan]Perintah slash:[/]"); [log.write(f"  [yellow]{c}[/] — {d}") for c, d in SLASH_HELP]
         elif cmd in ("yolo", "active", "a"): self.action_toggle_active()
         elif cmd == "model":
-            if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]model → {arg}[/]")
+            if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); self._load_window(); log.write(f"[green]model → {arg} (memuat context window…)[/]")
             else: self.action_pick_model()
         elif cmd == "provider":
             if arg in ("anthropic", "openai"):

@@ -802,6 +802,26 @@ def model_window(model):
     if "llama" in m or "mistral" in m or "qwen" in m: return 32000
     return 128000
 
+def fetch_context_window(provider, model, key, base_url):
+    """Ambil context window ASLI model dari provider (/models). Fallback ke model_window() bila tak ada."""
+    if provider == "anthropic":
+        return model_window(model)   # Claude ~200k (endpoint /models tak selalu sertakan ctx)
+    try:
+        r = urllib.request.urlopen(urllib.request.Request(base_url.rstrip("/") + "/models",
+                                   headers={"Authorization": "Bearer " + key}), timeout=20)
+        data = json.loads(r.read().decode("utf-8", "replace")).get("data") or []
+        for mo in data:
+            if mo.get("id") == model or mo.get("name") == model:
+                cands = [mo.get("context_length"), mo.get("context_window"), mo.get("max_context_length"),
+                         mo.get("max_input_tokens"), mo.get("max_tokens")]
+                tp = mo.get("top_provider")
+                if isinstance(tp, dict): cands.append(tp.get("context_length"))
+                for c in cands:
+                    if isinstance(c, (int, float)) and c > 0: return int(c)
+    except Exception:
+        pass
+    return model_window(model)
+
 def estimate_ctx(messages):
     """Perkiraan kasar token konteks (≈ 4 char/token). Fallback bila API tak kirim usage."""
     total = 0
