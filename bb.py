@@ -15,6 +15,7 @@ Pakai:
   python3 bb.py telegram             FAJAR-AGENT via Telegram (bot; butuh telegram_token+telegram_chat)
   python3 bb.py doctor               cek kesiapan tool
   python3 bb.py update               perbarui FAJAR-AGENT ke versi terbaru (git pull / unduh arsip)
+  python3 bb.py --version            tampilkan versi
   python3 bb.py help
 
 Filter pencarian (env, dipakai find/pipeline; atau Settings di TUI):
@@ -27,7 +28,19 @@ Semua perintah meneruskan argumen ke tool di tools/.
 """
 import os, sys, subprocess
 
+VERSION = "1.1"
 D = os.path.dirname(os.path.abspath(__file__))
+
+def _version():
+    sha = ""
+    try:  # tampilkan commit pendek bila ini git clone
+        if os.path.isdir(os.path.join(D, ".git")):
+            sha = " (" + subprocess.run(["git", "-C", D, "rev-parse", "--short", "HEAD"],
+                                        capture_output=True, text=True).stdout.strip() + ")"
+    except Exception:
+        pass
+    print(f"FAJAR-AGENT v{VERSION}{sha}  |  {D}")
+    print("update:  fajar update   |   repo: https://github.com/fajartan/fajar-agent")
 TOOLS = os.path.join(D, "tools") if os.path.isdir(os.path.join(D, "tools")) else D
 MAP = {"tui": "bbtui.py", "find": "daily-target-finder.py", "finder": "daily-target-finder.py",
        "recon": "recon.py", "monitor": "asset-monitor.py", "dedup": "dedup.py", "doctor": "doctor.py",
@@ -39,6 +52,8 @@ HELP = __doc__
 def main():
     args = sys.argv[1:]
     cmd = (args[0] if args else "tui").lower()
+    if cmd in ("--version", "-v", "version"):
+        _version(); return
     if cmd in ("help", "-h", "--help"):
         print(HELP); return
     script = MAP.get(cmd)
