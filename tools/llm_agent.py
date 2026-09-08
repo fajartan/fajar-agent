@@ -825,7 +825,7 @@ def fetch_context_window(provider, model, key, base_url):
         r = urllib.request.urlopen(urllib.request.Request(base_url.rstrip("/") + "/models",
                                    headers={"Authorization": "Bearer " + key}), timeout=20)
         data = json.loads(r.read().decode("utf-8", "replace"))
-        items = data.get("data") or data.get("models") or (data if isinstance(data, list) else [])
+        items = data if isinstance(data, list) else (data.get("data") or data.get("models") or [])
         m = (model or "").lower(); mtail = m.split("/")[-1]
         best = 0
         for mo in items:
