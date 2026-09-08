@@ -495,7 +495,7 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatlog { height: 1fr; padding: 0 1; background: $surface; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
-#thinkwrap { dock: bottom; height: 1; margin: 0 0 3 0; padding: 0 1; display: none; }
+#thinkwrap { height: 1; padding: 0 1; display: none; }
 #thinkwrap.on { display: block; }
 #thinklbl { width: auto; color: $accent; }
 #thinking { width: 1fr; }
@@ -944,10 +944,10 @@ class LlmChatScreen(ModalScreen):
         with Vertical(id="chatwrap"):
             yield Static(self._headerline(), id="chathdr")
             yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
-            yield Static(self._statusline(), id="chatstatus")
-            with Horizontal(id="thinkwrap"):
+            with Horizontal(id="thinkwrap"):    # indikator loading DI ATAS baris info
                 yield Static("⏳ memproses", id="thinklbl")
                 yield ProgressBar(id="thinking", show_percentage=False, show_eta=False)
+            yield Static(self._statusline(), id="chatstatus")
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("⏹", id="btnstop", variant="error")
