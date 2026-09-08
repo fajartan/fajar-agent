@@ -14,6 +14,7 @@ Butuh: python3 (stdlib) + internet.  Cron:  0 8 * * * python3 daily-target-finde
 import json, os, datetime, urllib.request
 
 BASE = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/{}_data.json"
+DISCLOSE_URL = "https://raw.githubusercontent.com/disclose/diodb/master/program-list.json"
 PLATFORMS = os.environ.get("BBTF_PLATFORMS", "hackerone,bugcrowd,yeswehack,intigriti,federacy").split(",")
 REQUIRE_WILDCARD = os.environ.get("BBTF_WILDCARD", "1") == "1"
 MIN_BOUNTY = int(os.environ.get("BBTF_MIN_BOUNTY", "0"))
@@ -23,7 +24,8 @@ STATE = os.path.join(OUT, ".state", "snapshot.json")
 SEV = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0, None: 0}
 
 def fetch(pf):
-    req = urllib.request.Request(BASE.format(pf), headers={"User-Agent": "bbtf/2.0"})
+    url = DISCLOSE_URL if pf == "disclose" else BASE.format(pf)
+    req = urllib.request.Request(url, headers={"User-Agent": "bbtf/2.0"})
     with urllib.request.urlopen(req, timeout=90) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
@@ -117,6 +119,14 @@ def norm(pf, p):
                     url=p.get("url", ""), bounty=True, bounty_min=None, bounty_max=None,
                     managed=False, maxsev="—", signal="—",
                     n_assets=len(ids), scope=ids, wild=[x for x in ids if is_wild(x)], detail=detail)
+    if pf == "disclose":   # diodb — independen/self-hosted/VDP (scope tak terstruktur; baca policy_url)
+        pol = p.get("policy_url")
+        if not pol or str(p.get("policy_url_status", "")).lower() == "dead":
+            return None
+        return dict(platform="disclose", key=f"dio|{p.get('program_name') or pol}", name=p.get("program_name") or pol,
+                    url=pol, bounty=(str(p.get("offers_bounty", "")).lower() == "yes"), bounty_min=None, bounty_max=None,
+                    managed=None, maxsev="—", signal=f"safe_harbor={p.get('safe_harbor','?')}",
+                    n_assets=0, scope=[], wild=[], detail=[])
     return None
 
 def passes(pr):

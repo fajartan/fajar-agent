@@ -20,6 +20,7 @@ except ImportError:
              "    (atau: python3 -m venv ~/.venv-bbtui && ~/.venv-bbtui/bin/pip install textual && ~/.venv-bbtui/bin/python bbtui.py)")
 
 BASE = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data/{}_data.json"
+DISCLOSE_URL = "https://raw.githubusercontent.com/disclose/diodb/master/program-list.json"  # 2400+ program independen/VDP/self-hosted
 CFG_DIR = os.path.expanduser("~/.config/bbtui"); CFG = os.path.join(CFG_DIR, "config.json")
 SEEN = os.path.join(CFG_DIR, "seen.json")  # baseline utk deteksi PROGRAM BARU antar sesi
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -97,7 +98,7 @@ DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", 
                }}
 SEV = {"critical": 4, "high": 3, "medium": 2, "low": 1, "none": 0, None: 0}
 PROVIDERS = ["jina", "firecrawl", "scraperapi", "serper", "h1api"]
-PLAT_ALL = ["hackerone", "bugcrowd", "yeswehack", "intigriti", "federacy"]
+PLAT_ALL = ["hackerone", "bugcrowd", "yeswehack", "intigriti", "federacy", "disclose"]
 
 def load_cfg():
     os.makedirs(CFG_DIR, exist_ok=True); c = dict(DEFAULT_CFG)
@@ -117,7 +118,9 @@ def save_cfg(c):
 def _get(url, headers=None, data=None, timeout=90):
     return urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers or {}), timeout=timeout).read().decode("utf-8", "replace")
 
-def fetch(pf): return json.loads(_get(BASE.format(pf), headers={"User-Agent": "bbtui/3"}))
+def fetch(pf):
+    url = DISCLOSE_URL if pf == "disclose" else BASE.format(pf)
+    return json.loads(_get(url, headers={"User-Agent": "bbtui/3"}))
 def is_wild(s): return isinstance(s, str) and "*" in s
 def types_of(pr):
     t = set()
@@ -185,6 +188,13 @@ def norm(pf, p):
                     bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", signal="-",
                     managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
                     scope=ids, wild=[x for x in ids if is_wild(x)])
+    if pf == "disclose":   # diodb — program independen/self-hosted/VDP (scope tak terstruktur → baca policy_url)
+        pol = p.get("policy_url")
+        if not pol or str(p.get("policy_url_status", "")).lower() == "dead": return None
+        return dict(platform="disclose", key=f"dio|{p.get('program_name') or pol}", name=p.get("program_name") or pol,
+                    url=pol, bounty=(str(p.get("offers_bounty", "")).lower() == "yes"), bounty_min=None, bounty_max=None,
+                    cur="$", maxsev="-", signal=f"safe_harbor={p.get('safe_harbor','?')} swag={p.get('offers_swag')}",
+                    managed=None, eff=None, ttfr=None, ttb=None, ttr=None, scope=[], wild=[])
     return None
 
 def quiet_score(pr, is_new=False):
@@ -416,7 +426,7 @@ class SettingsScreen(ModalScreen):
         with VerticalScroll(id="stat"):
             yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] atau tombol Simpan = simpan · Enter di field = simpan · esc = batal TANPA simpan)", classes="title")
             yield Label("\n[b yellow]— KRITERIA PENCARIAN —[/]")
-            yield Label("Platform (pisah koma) — hanya 5 ini yg tersedia (sumber data): hackerone,bugcrowd,yeswehack,intigriti,federacy")
+            yield Label("Platform (pisah koma): hackerone,bugcrowd,yeswehack,intigriti,federacy · +disclose (2400+ program independen/VDP; tambahkan & matikan 'wajib wildcard' utk lihat)")
             yield Input(value=",".join(self.cfg.get("platforms", [])), id="plat")
             yield Label("Min bounty (0 = semua)")
             yield Input(value=str(self.cfg.get("min_bounty", 0)), id="minb")
