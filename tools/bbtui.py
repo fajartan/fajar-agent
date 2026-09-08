@@ -867,7 +867,6 @@ SLASH_HELP = [
     ("/add <path>", "upload/ingest file atau folder projek ke konteks (drag path juga bisa)"),
     ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
-    ("/copy [all]", "salin jawaban agent terakhir (atau all=seluruh percakapan) ke clipboard"),
     ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=⏹/esc)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
@@ -1074,7 +1073,8 @@ class LlmChatScreen(ModalScreen):
             log.write("[dim]Tekan Enter/Kirim untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
             log.write(f"[dim]  saran: “mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF”[/]")
             self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
-        log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹ atau esc=stop proses · [b]Ctrl+Q atau /quit=keluar sesi[/] · q di layar utama=tutup aplikasi[/]")
+        log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹/esc=stop · Ctrl+Q atau /quit=keluar · q di layar utama=tutup[/]")
+        log.write("[dim]📋 salin: drag mouse pilih teks → Ctrl+C   ·   🔗 URL: Ctrl+Click buka browser[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
         inp.focus()
@@ -1203,21 +1203,6 @@ class LlmChatScreen(ModalScreen):
             p, mdl, base, k = _llm_creds(self.cfg)
             log.write("[magenta]⟳ meringkas konteks…[/]"); self._do_compact(p, mdl, base, k)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
-        elif cmd == "copy":
-            if arg.lower() == "all" and self.messages:
-                buf = []
-                for msg in self.messages:
-                    c = msg.get("content")
-                    if msg.get("role") == "user" and isinstance(c, str) and not c.startswith("["): buf.append("KAMU: " + c)
-                    elif msg.get("role") == "assistant":
-                        t = "".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text") if isinstance(c, list) else (c.get("content") if isinstance(c, dict) else str(c))
-                        if t and t.strip(): buf.append("AGENT: " + t)
-                txt = "\n\n".join(buf)
-            else:
-                txt = self._last_agent
-            if not txt: log.write("[yellow]belum ada yg bisa disalin.[/]"); return
-            try: self.app.copy_to_clipboard(txt); log.write(f"[green]📋 disalin ke clipboard ({len(txt)} char).[/]")
-            except Exception as e: log.write(f"[yellow]clipboard tak didukung ({e}). Pakai Shift+drag lalu Ctrl+Shift+C.[/]")
         elif cmd == "stop": self.action_stop()
         elif cmd in ("quit", "exit", "q", "keluar"):
             if self.busy: self.action_stop()
@@ -1441,6 +1426,7 @@ class SchedulerScreen(ModalScreen):
 
 class BBTUI(App):
     CSS = CSS
+    ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy — tanpa Shift/slash
     TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
     BINDINGS = [("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
