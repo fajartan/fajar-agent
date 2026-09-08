@@ -1076,7 +1076,15 @@ class LlmChatScreen(ModalScreen):
         else: self.query_one("#chatlog", RichLog).write("[dim]keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/]. (esc sengaja tidak menutup agar tak salah pencet)[/]")
     def action_quit_chat(self):
         if self.busy: self.action_stop()
+        self._autosave()
         self.app.pop_screen()
+    def _autosave(self):
+        try:
+            if self.messages: _llm_mod().session_save(self.sess_key, self.messages)
+        except Exception: pass
+    def on_unmount(self):
+        # jaminan simpan saat layar chat ditutup / app keluar tiba-tiba (chat terakhir tersimpan)
+        self._autosave()
     # ---- actions ----
     def action_toggle_active(self):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
