@@ -495,6 +495,8 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatlog { height: 1fr; padding: 0 1; background: $surface; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
+#thinking { height: 1; padding: 0 1; color: $warning; display: none; }
+#thinking.on { display: block; }
 #chatbar { dock: bottom; height: 3; }
 #chatinput { width: 1fr; border: tall $accent; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
@@ -926,17 +928,21 @@ class LlmChatScreen(ModalScreen):
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
-        self.sess_start = datetime.datetime.now()
+        self.sess_start = datetime.datetime.now(); self._tk = 0
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
         # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
         self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
+    THINK_KAO = ["(°□°)", "(￣▽￣)", "( ˘•ω•˘ )", "(⌐■_■)", "(¬_¬ )", "(๑•̀ㅂ•́)و", "(°▽°)", "( •̀ ω •́ )"]
+    THINK_WORD = ["musing…", "berpikir…", "menganalisa…", "merangkai hipotesis…", "menimbang…",
+                  "meracik payload…", "menyusun rencana…", "menelusuri scope…", "brainstorming…"]
     def compose(self) -> ComposeResult:
         _p, _m, _b, key = _llm_creds(self.cfg)
         with Vertical(id="chatwrap"):
             yield Static(self._headerline(), id="chathdr")
             yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
             yield Static(self._statusline(), id="chatstatus")
+            yield Static("", id="thinking")
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("⏹", id="btnstop", variant="error")
@@ -973,12 +979,24 @@ class LlmChatScreen(ModalScreen):
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
+    def _tick(self):
+        self._refresh_bars()
+        try: th = self.query_one("#thinking", Static)
+        except Exception: return
+        if self.busy:
+            self._tk += 1
+            kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
+            word = self.THINK_WORD[(self._tk // 2) % len(self.THINK_WORD)]
+            dots = "." * (self._tk % 4)
+            th.update(f"[yellow]{kao}[/]  [dim italic]{word}{dots}[/]"); th.add_class("on")
+        else:
+            th.remove_class("on")
     def on_mount(self):
         log = self.query_one("#chatlog", RichLog)
         prov, model, _b, key = _llm_creds(self.cfg)
         la = _llm_mod()
         self.window = la.model_window(model)          # ctx bar langsung tampil (0/window) sejak awal
-        self.set_interval(1.0, self._refresh_bars)    # jam sesi & elapsed hidup tiap detik
+        self.set_interval(0.7, self._tick)            # jam sesi + animasi "loading" saat nunggu LLM
         # --- banner + identitas harness ---
         log.write(AGENT_BANNER)
         log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  ·  {AGENT_TAGLINE}")
