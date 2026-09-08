@@ -36,7 +36,7 @@ DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", 
                "telegram_token": "", "telegram_chat": "", "discord_webhook": "",
                # Telegram bot FAJAR-AGENT (pakai token+chat di atas)
                "telegram_bot_enabled": False, "telegram_allow_active": False, "telegram_allowlist": "",
-               "llm_provider": "anthropic", "llm_model": "", "llm_base_url": "", "llm_api_key": "",
+               "llm_provider": "anthropic", "llm_model": "", "llm_base_url": "", "llm_api_key": "", "llm_context": 0,
                "mcp_servers": {},   # integrasi MCP: {"nama": {"command","args":[],"env":{},"trusted":false,"enabled":true}}
                "external_tools": {   # integrasi tool lain (jalan bila terpasang) — {target}=domain {url} {handle}. Edit bebas.
                    # -- orkestrator recon --
@@ -632,6 +632,8 @@ class SettingsScreen(ModalScreen):
             yield Label("base_url (openai-compatible saja, mis. http://localhost:11434/v1)")
             yield Input(value=self.cfg.get("llm_base_url", ""), id="lbase")
             yield Label("llm_api_key"); yield Input(value=self.cfg.get("llm_api_key", ""), id="lkey", password=True)
+            yield Label("llm_context (override context window token; 0 = auto dari model)")
+            yield Input(value=str(self.cfg.get("llm_context", 0)), id="lctx")
             mcps = self.cfg.get("mcp_servers") or {}
             yield Label(f"[dim]MCP: {len(mcps)} server terdaftar. Edit di ~/.config/bbtui/config.json → \"mcp_servers\": "
                         "{{\"nama\": {{\"command\":\"npx\",\"args\":[...],\"trusted\":false}}}}. Di chat: /mcp connect.[/]")
@@ -668,6 +670,7 @@ class SettingsScreen(ModalScreen):
             self.cfg["telegram_allowlist"] = g("tgallow")
             self.cfg["llm_provider"] = g("lprov") or "anthropic"; self.cfg["llm_model"] = g("lmodel")
             self.cfg["llm_base_url"] = g("lbase"); self.cfg["llm_api_key"] = g("lkey")
+            self.cfg["llm_context"] = digit("lctx")
             save_cfg(self.cfg)
             self.app.pop_screen()
             if ignored:
@@ -983,6 +986,12 @@ class LlmChatScreen(ModalScreen):
                 f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
     @work(thread=True)
     def _load_window(self):
+        try:  # override manual menang (llm_context di Settings; 0 = auto)
+            ov = int(self.cfg.get("llm_context") or 0)
+        except Exception:
+            ov = 0
+        if ov > 0:
+            self.window = ov; self.app.call_from_thread(self._refresh_bars); return
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: return
         try:

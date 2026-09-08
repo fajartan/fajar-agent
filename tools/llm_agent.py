@@ -802,22 +802,40 @@ def model_window(model):
     if "llama" in m or "mistral" in m or "qwen" in m: return 32000
     return 128000
 
+def _ctx_from_entry(mo):
+    """Cari nilai context window dari satu entri model, di berbagai lokasi field yg umum."""
+    cands = [mo.get("context_length"), mo.get("context_window"), mo.get("max_context_length"),
+             mo.get("max_input_tokens"), mo.get("max_tokens"), mo.get("context"), mo.get("n_ctx")]
+    for sub in ("top_provider", "architecture", "config", "limits", "context_window"):
+        v = mo.get(sub)
+        if isinstance(v, dict):
+            cands += [v.get("context_length"), v.get("context_window"), v.get("max_tokens"), v.get("input")]
+        elif isinstance(v, (int, float)):
+            cands.append(v)
+    for c in cands:
+        if isinstance(c, (int, float)) and c > 0:
+            return int(c)
+    return 0
+
 def fetch_context_window(provider, model, key, base_url):
-    """Ambil context window ASLI model dari provider (/models). Fallback ke model_window() bila tak ada."""
+    """Ambil context window ASLI model dari provider (/models). Matching fleksibel. Fallback heuristik."""
     if provider == "anthropic":
         return model_window(model)   # Claude ~200k (endpoint /models tak selalu sertakan ctx)
     try:
         r = urllib.request.urlopen(urllib.request.Request(base_url.rstrip("/") + "/models",
                                    headers={"Authorization": "Bearer " + key}), timeout=20)
-        data = json.loads(r.read().decode("utf-8", "replace")).get("data") or []
-        for mo in data:
-            if mo.get("id") == model or mo.get("name") == model:
-                cands = [mo.get("context_length"), mo.get("context_window"), mo.get("max_context_length"),
-                         mo.get("max_input_tokens"), mo.get("max_tokens")]
-                tp = mo.get("top_provider")
-                if isinstance(tp, dict): cands.append(tp.get("context_length"))
-                for c in cands:
-                    if isinstance(c, (int, float)) and c > 0: return int(c)
+        data = json.loads(r.read().decode("utf-8", "replace"))
+        items = data.get("data") or data.get("models") or (data if isinstance(data, list) else [])
+        m = (model or "").lower(); mtail = m.split("/")[-1]
+        best = 0
+        for mo in items:
+            if not isinstance(mo, dict): continue
+            mid = str(mo.get("id") or mo.get("name") or "").lower()
+            if not mid: continue
+            if mid == m or mid == mtail or mid.split("/")[-1] == mtail or m in mid or mtail in mid:
+                c = _ctx_from_entry(mo)
+                if c > best: best = c
+        if best > 0: return best
     except Exception:
         pass
     return model_window(model)
