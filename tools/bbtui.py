@@ -252,6 +252,52 @@ def passes(pr, cfg):
         if isinstance(v, (int, float)) and v > _num(cfg, "max_ttb"): return False
     return True
 
+def _h1_auth_hdr(cfg):
+    u = cfg.get("h1_api_user"); t = cfg.get("h1_api_token")
+    if not u or not t: return None
+    return {"Authorization": "Basic " + base64.b64encode(f"{u}:{t}".encode()).decode(), "Accept": "application/json"}
+
+def _h1_detail(handle, hdr):
+    """Ambil scope terstruktur 1 program H1 lewat API resmi (termasuk PRIVATE yg kamu diundang)."""
+    try:
+        d = json.loads(_get(f"https://api.hackerone.com/v1/hackers/programs/{handle}", headers=hdr, timeout=30))
+        a = d.get("data", {}).get("attributes", {}) or {}
+        ss = (((d.get("data", {}).get("relationships", {}) or {}).get("structured_scopes", {}) or {}).get("data", [])) or []
+        assets = [s.get("attributes", {}) for s in ss]
+        scope = [x.get("asset_identifier") for x in assets if x.get("asset_identifier") and x.get("eligible_for_submission", True)]
+        wild = [x.get("asset_identifier") for x in assets if x.get("asset_identifier") and (x.get("asset_type") == "WILDCARD" or is_wild(x.get("asset_identifier")))]
+        mx = max((SEV.get((x.get("max_severity") or "").lower(), 0) for x in assets), default=0)
+        sev = {v: k for k, v in SEV.items()}.get(mx, "-")
+        return dict(platform="hackerone", key=f"h1|{handle}", name="🔒 " + (a.get("name") or handle),
+                    url=f"https://hackerone.com/{handle}", bounty=bool(a.get("offers_bounties")), bounty_min=None,
+                    bounty_max=None, cur="$", maxsev=sev, managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
+                    signal="PRIVATE / accessible (login API)", scope=scope, wild=wild)
+    except Exception:
+        return None
+
+def fetch_h1_private(cfg, have_keys, cap=60):
+    """Tarik program yg BISA KAMU AKSES dari akun H1 (termasuk PRIVATE) via API resmi. Butuh h1_api_user+token."""
+    hdr = _h1_auth_hdr(cfg)
+    if not hdr: return {}, None
+    out = {}; url = "https://api.hackerone.com/v1/hackers/programs?page%5Bsize%5D=100"
+    try:
+        for _pg in range(8):
+            d = json.loads(_get(url, headers=hdr, timeout=45))
+            for it in d.get("data", []):
+                h = (it.get("attributes", {}) or {}).get("handle")
+                if not h: continue
+                key = f"h1|{h}"
+                if key in have_keys or key in out: continue   # sudah ada dari data publik → yg tersisa = private/baru
+                pr = _h1_detail(h, hdr)
+                if pr: out[key] = pr
+                if len(out) >= cap: return out, None
+            nxt = (d.get("links") or {}).get("next")
+            if not nxt: break
+            url = nxt
+        return out, None
+    except Exception as e:
+        return out, f"h1-api: {e}"
+
 def load_programs(cfg):
     cur, errs = {}, []
     for pf in cfg["platforms"]:
@@ -261,6 +307,12 @@ def load_programs(cfg):
                 if pr and passes(pr, cfg): cur[pr["key"]] = pr
         except Exception as e:
             errs.append(f"{pf}: {e}")
+    # + program PRIVATE dari akun H1 (bila token diisi) — cakupan lebih luas lewat login
+    if cfg.get("h1_api_user") and cfg.get("h1_api_token"):
+        priv, perr = fetch_h1_private(cfg, set(cur.keys()))
+        for k, pr in priv.items():
+            if passes(pr, cfg): cur[k] = pr
+        if perr: errs.append(perr)
     return cur, errs
 
 # ---------- tool runner helpers ----------
@@ -463,6 +515,7 @@ class SettingsScreen(ModalScreen):
             yield Input(value=self.cfg.get("enrich_provider", "jina"), id="prov")
             yield Label("firecrawl_api_key"); yield Input(value=self.cfg.get("firecrawl_api_key", ""), id="fc", password=True)
             yield Label("serper_api_key"); yield Input(value=self.cfg.get("serper_api_key", ""), id="sp", password=True)
+            yield Label("h1_api_user + token → tarik program yg BISA KAMU AKSES termasuk PRIVATE/invite (via API resmi H1). Buat token: hackerone.com/settings/api_token")
             yield Label("h1_api_user"); yield Input(value=self.cfg.get("h1_api_user", ""), id="h1u")
             yield Label("h1_api_token"); yield Input(value=self.cfg.get("h1_api_token", ""), id="h1t", password=True)
             yield Label("\n[b yellow]— NOTIFIKASI —[/]")
