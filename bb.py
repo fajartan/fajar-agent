@@ -62,7 +62,13 @@ def main():
     path = os.path.join(TOOLS, script)
     if not os.path.exists(path):
         sys.exit(f"[!] tidak ketemu: {path}")
-    sys.exit(subprocess.call([sys.executable, path] + args[1:]))
+    try:
+        sys.exit(subprocess.call([sys.executable, path] + args[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)   # anak menangani Ctrl+C sendiri; induk keluar diam-diam
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(130)

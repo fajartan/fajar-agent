@@ -1455,4 +1455,7 @@ class BBTUI(App):
     def action_settings(self): self.push_screen(SettingsScreen(self.cfg))
 
 if __name__ == "__main__":
-    BBTUI().run()
+    try:
+        BBTUI().run()
+    except KeyboardInterrupt:
+        pass   # keluar bersih tanpa traceback (Ctrl+C)
