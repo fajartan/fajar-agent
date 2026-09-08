@@ -764,7 +764,7 @@ def _md_line(raw):
 
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
-    BINDINGS = [("escape", "soft_escape", "stop/keluar"), ("ctrl+a", "toggle_active", "yolo"),
+    BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
                 ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear")]
     def __init__(self, cfg, target=None):
         super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
@@ -809,7 +809,7 @@ class LlmChatScreen(ModalScreen):
             if el > 0: tps = f"  │  {el:.0f}s · {self.tok_out/el:.0f} t/s"
         cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
         return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{tps}  │  giliran {self.turns}{cmp}  │  "
-                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/help·⏹stop·/quit[/]")
+                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/help · esc=stop · Ctrl+Q=keluar[/]")
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
@@ -860,7 +860,7 @@ class LlmChatScreen(ModalScreen):
             if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) — ketik [b]/resume[/] untuk lanjutkan (menimpa sesi baru).[/]")
             inp.value = f"Mulai SCOPE-GATE untuk {self.target.get('name')} pakai TARGET CONTEXT, lalu susun rencana hunting bertahap sesuai jenis aset."
             log.write("[dim]💡 goal terisi di bawah — tekan Kirim/Enter untuk mulai (tidak jalan otomatis).[/]")
-        log.write("\n[dim]➤ Kirim (atau Enter) untuk mulai · ⏹/esc stop · keluar: /quit[/]")
+        log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹ atau esc=stop proses · [b]Ctrl+Q atau /quit=keluar sesi[/] · q di layar utama=tutup aplikasi[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
         inp.focus()
@@ -881,9 +881,12 @@ class LlmChatScreen(ModalScreen):
         self.busy = False; self.activity = "idle"; self._refresh_bars()
         log.write("[yellow]⏹ dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
     def action_soft_escape(self):
-        # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan pakai /quit
+        # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan cara keluar
         if self.busy: self.action_stop()
-        else: self.query_one("#chatlog", RichLog).write("[dim]untuk keluar sesi chat, ketik [b]/quit[/] (esc tidak menutup agar tak sengaja keluar).[/]")
+        else: self.query_one("#chatlog", RichLog).write("[dim]keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/]. (esc sengaja tidak menutup agar tak salah pencet)[/]")
+    def action_quit_chat(self):
+        if self.busy: self.action_stop()
+        self.app.pop_screen()
     # ---- actions ----
     def action_toggle_active(self):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
@@ -1074,6 +1077,7 @@ class SchedulerScreen(ModalScreen):
 
 class BBTUI(App):
     CSS = CSS
+    ENABLE_COMMAND_PALETTE = False   # matikan palette bawaan Textual (ctrl+p) yg bikin bingung
     TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"
     BINDINGS = [("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
