@@ -222,7 +222,8 @@ def _num(cfg, k):
 
 def passes(pr, cfg):
     if not pr["bounty"]: return False
-    if cfg["require_wildcard"] and not pr["wild"]: return False
+    _priv = "PRIVATE" in str(pr.get("signal", ""))   # program private via token = selalu tampil (tak butuh wildcard)
+    if cfg["require_wildcard"] and not pr["wild"] and not _priv: return False
     if cfg["min_bounty"] and pr["bounty_max"] is not None and pr["bounty_max"] < cfg["min_bounty"]: return False
     af = [x for x in str(cfg.get("asset_type", "")).lower().replace(" ", "").split(",") if x]
     if af:
@@ -299,6 +300,52 @@ def fetch_h1_private(cfg, have_keys, cap=60):
     except Exception as e:
         return out, f"h1-api: {e}"
 
+def _bearer(tok):
+    return {"Authorization": "Bearer " + tok, "Accept": "application/json"} if tok else None
+
+def fetch_intigriti_private(cfg, have_keys, cap=60):
+    """Program yg bisa diakses akun Intigriti (termasuk PRIVATE) via Personal Access Token. EKSPERIMENTAL (verifikasi dgn token)."""
+    tok = cfg.get("intigriti_api_token")
+    if not tok: return {}, None
+    out = {}
+    try:
+        d = json.loads(_get("https://api.intigriti.com/external/researcher/v1/programs?limit=500", headers=_bearer(tok), timeout=45))
+        items = d if isinstance(d, list) else (d.get("records") or d.get("data") or d.get("items") or [])
+        for it in items:
+            handle = it.get("handle") or it.get("id") or it.get("programId") or it.get("name")
+            if not handle: continue
+            key = f"it|{handle}"
+            if key in have_keys or key in out: continue
+            url = it.get("webLink") or it.get("url") or f"https://app.intigriti.com/researcher/programs/{handle}"
+            out[key] = dict(platform="intigriti", key=key, name="🔒 " + str(it.get("name") or handle), url=url,
+                            bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", managed=None,
+                            eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (Intigriti token)", scope=[], wild=[])
+            if len(out) >= cap: break
+        return out, None
+    except Exception as e:
+        return out, f"intigriti-api: {e}"
+
+def fetch_ywh_private(cfg, have_keys, cap=60):
+    """Program PRIVATE yg bisa diakses akun YesWeHack via token JWT (public sudah dari data publik)."""
+    tok = cfg.get("yeswehack_api_token")
+    if not tok: return {}, None
+    out = {}
+    try:
+        d = json.loads(_get("https://api.yeswehack.com/programs?limit=100", headers=_bearer(tok), timeout=45))
+        for it in (d.get("items") or []):
+            slug = it.get("slug")
+            if not slug or it.get("public"): continue   # yg publik sudah tercakup; ambil yg PRIVATE
+            key = f"ywh|{slug}"
+            if key in have_keys or key in out: continue
+            out[key] = dict(platform="yeswehack", key=key, name="🔒 " + (it.get("title") or slug),
+                            url=f"https://yeswehack.com/programs/{slug}", bounty=bool(it.get("bounty")), bounty_min=None,
+                            bounty_max=None, cur="$", maxsev="-", managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
+                            signal="PRIVATE/accessible (YWH token)", scope=[], wild=[])
+            if len(out) >= cap: break
+        return out, None
+    except Exception as e:
+        return out, f"ywh-api: {e}"
+
 def load_programs(cfg):
     cur, errs = {}, []
     for pf in cfg["platforms"]:
@@ -308,12 +355,18 @@ def load_programs(cfg):
                 if pr and passes(pr, cfg): cur[pr["key"]] = pr
         except Exception as e:
             errs.append(f"{pf}: {e}")
-    # + program PRIVATE dari akun H1 (bila token diisi) — cakupan lebih luas lewat login
+    # + program PRIVATE dari akun (bila token diisi) — cakupan lebih luas lewat API token
     if cfg.get("h1_api_user") and cfg.get("h1_api_token"):
         priv, perr = fetch_h1_private(cfg, set(cur.keys()))
         for k, pr in priv.items():
             if passes(pr, cfg): cur[k] = pr
         if perr: errs.append(perr)
+    for fn, tokkey in ((fetch_intigriti_private, "intigriti_api_token"), (fetch_ywh_private, "yeswehack_api_token")):
+        if cfg.get(tokkey):
+            priv, perr = fn(cfg, set(cur.keys()))
+            for k, pr in priv.items():
+                if passes(pr, cfg): cur[k] = pr
+            if perr: errs.append(perr)
     return cur, errs
 
 # ---------- tool runner helpers ----------
