@@ -867,6 +867,7 @@ SLASH_HELP = [
     ("/add <path>", "upload/ingest file atau folder projek ke konteks (drag path juga bisa)"),
     ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
+    ("/copy [all]", "salin jawaban agent terakhir (atau all=seluruh percakapan) ke clipboard"),
     ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=⏹/esc)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
@@ -917,6 +918,8 @@ def _md_line(raw):
         s = _re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/]", s)
         s = _re.sub(r"(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)", r"[i]\1[/]", s)
         s = _re.sub(r"`([^`]+)`", r"[cyan]\1[/]", s)
+        # URL → link clickable (Ctrl+Click buka browser di terminal yg dukung)
+        s = _re.sub(r"(https?://[^\s\]\)>'\"]+)", r"[link=\1][u cyan]\1[/u cyan][/link]", s)
         return s
     if hashes and st[hashes:hashes + 1] == " ":            # heading → tebal polos (tenang), tanpa '#'
         return "[b]" + inline(escape(st[hashes:].strip())) + "[/]"
@@ -934,7 +937,7 @@ class LlmChatScreen(ModalScreen):
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
-        self.sess_start = datetime.datetime.now(); self._tk = 0
+        self.sess_start = datetime.datetime.now(); self._tk = 0; self._last_agent = ""
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
         # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
@@ -1200,6 +1203,21 @@ class LlmChatScreen(ModalScreen):
             p, mdl, base, k = _llm_creds(self.cfg)
             log.write("[magenta]⟳ meringkas konteks…[/]"); self._do_compact(p, mdl, base, k)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
+        elif cmd == "copy":
+            if arg.lower() == "all" and self.messages:
+                buf = []
+                for msg in self.messages:
+                    c = msg.get("content")
+                    if msg.get("role") == "user" and isinstance(c, str) and not c.startswith("["): buf.append("KAMU: " + c)
+                    elif msg.get("role") == "assistant":
+                        t = "".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text") if isinstance(c, list) else (c.get("content") if isinstance(c, dict) else str(c))
+                        if t and t.strip(): buf.append("AGENT: " + t)
+                txt = "\n\n".join(buf)
+            else:
+                txt = self._last_agent
+            if not txt: log.write("[yellow]belum ada yg bisa disalin.[/]"); return
+            try: self.app.copy_to_clipboard(txt); log.write(f"[green]📋 disalin ke clipboard ({len(txt)} char).[/]")
+            except Exception as e: log.write(f"[yellow]clipboard tak didukung ({e}). Pakai Shift+drag lalu Ctrl+Shift+C.[/]")
         elif cmd == "stop": self.action_stop()
         elif cmd in ("quit", "exit", "q", "keluar"):
             if self.busy: self.action_stop()
@@ -1320,6 +1338,7 @@ class LlmChatScreen(ModalScreen):
         from rich.panel import Panel
         from rich.console import Group
         from rich.text import Text
+        self._last_agent = body   # utk /copy
         log = self.query_one("#chatlog", RichLog)
         parts = []; lines = body.splitlines(); n = len(lines); i = 0; para = []
         def flush():
