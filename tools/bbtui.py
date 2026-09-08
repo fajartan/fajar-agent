@@ -772,6 +772,9 @@ class LlmChatScreen(ModalScreen):
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
+        # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
+        base = (target.get("key") or target.get("name")) if target else "general"
+        self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
     def compose(self) -> ComposeResult:
         _p, _m, _b, key = _llm_creds(self.cfg)
         with Vertical(id="chatwrap"):
@@ -837,7 +840,6 @@ class LlmChatScreen(ModalScreen):
         try:
             mi = la.mem_list()
             if mi and "kosong" not in mi: log.write(f"[dim]🧠 memori jangka panjang: {mi.count(chr(10))} entri (recall lintas sesi).[/]")
-            if la.session_load("tui"): log.write("[green]💾 ada sesi tersimpan — ketik /resume (atau ctrl+r) untuk lanjutkan.[/]")
         except Exception: pass
         # --- alur & welcome ---
         log.write("\n[cyan]Alur bertahap:[/] pilih target → recon → analisa/hipotesis → rencana → verifikasi → draf laporan → [b]submit=kamu[/]")
@@ -853,7 +855,9 @@ class LlmChatScreen(ModalScreen):
             present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
             log.write(f"\n[b green]🎯 TARGET:[/] [b]{self.target.get('name')}[/] [{self.target.get('platform')}]  "
                       f"· aset: {', '.join(present) or '-'}  · wildcard: {len(self.target.get('wild',[]))}  · sev: {self.target.get('maxsev','-')}")
-            log.write("[dim]scope resmi sudah dimuat ke konteks agent (tidak perlu cari ulang).[/]")
+            log.write("[dim]💬 sesi chat BARU & bersih untuk target ini. Scope resmi sudah dimuat ke konteks.[/]")
+            prev = la.session_load(self.sess_key)
+            if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) — ketik [b]/resume[/] untuk lanjutkan (menimpa sesi baru).[/]")
             inp.value = f"Mulai SCOPE-GATE untuk {self.target.get('name')} pakai TARGET CONTEXT, lalu susun rencana hunting bertahap sesuai jenis aset."
             log.write("[dim]💡 goal terisi di bawah — tekan Kirim/Enter untuk mulai (tidak jalan otomatis).[/]")
         log.write("\n[dim]➤ Kirim (atau Enter) untuk mulai · ⏹/esc stop · keluar: /quit[/]")
@@ -889,7 +893,7 @@ class LlmChatScreen(ModalScreen):
     def action_clear(self):
         self.query_one("#chatlog", RichLog).clear(); self.query_one("#chatlog", RichLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
     def action_resume(self):
-        msgs = _llm_mod().session_load("tui"); log = self.query_one("#chatlog", RichLog)
+        msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", RichLog)
         if not msgs: log.write("[yellow]tak ada sesi tersimpan.[/]"); return
         self.messages = msgs
         last = next((x for x in reversed(msgs) if isinstance(x.get("content"), str)), None)
@@ -907,12 +911,17 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "provider" and arg in ("anthropic", "openai"):
             self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider → {arg}[/]")
         elif cmd in ("new", "reset"):
-            self.messages = None; self.tok_in = self.tok_out = self.turns = 0; self._refresh_bars()
-            log.write("[b]— sesi baru —[/] [dim](memori jangka panjang tetap)[/]")
+            self.messages = None; self.tok_in = self.tok_out = self.turns = 0; self.ctx = 0; self.t0 = None; self._refresh_bars()
+            if self.target:   # sesi baru tetap bawa scope target
+                self.messages = _llm_mod().new_messages(_llm_creds(self.cfg)[0] == "anthropic")
+                self.messages.append({"role": "user", "content": program_context(self.target)})
+                log.write(f"[b]— sesi baru untuk {self.target.get('name')} —[/] [dim](scope target dimuat ulang; memori tetap)[/]")
+            else:
+                log.write("[b]— sesi baru —[/] [dim](memori jangka panjang tetap)[/]")
         elif cmd == "clear": self.action_clear()
         elif cmd == "resume": self.action_resume()
         elif cmd == "save":
-            if self.messages: _llm_mod().session_save("tui", self.messages); log.write("[green]sesi disimpan.[/]")
+            if self.messages: _llm_mod().session_save(self.sess_key, self.messages); log.write("[green]sesi disimpan.[/]")
             else: log.write("[yellow]belum ada percakapan.[/]")
         elif cmd == "memory":
             out = _llm_mod().mem_search(arg) if arg else _llm_mod().mem_list()
@@ -969,7 +978,7 @@ class LlmChatScreen(ModalScreen):
         prov = _llm_creds(self.cfg)[0]
         if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
         self.messages.append({"role": "user", "content": f"[ARTEFAK DI-UPLOAD: {label}]\n{content}"})
-        try: la.session_save("tui", self.messages)
+        try: la.session_save(self.sess_key, self.messages)
         except Exception: pass
         log.write(f"[green]📎 ditambahkan ke konteks:[/] {label} [dim]({len(content)} char)[/]. "
                   "Beri instruksi (mis. 'cari endpoint & secret di artefak ini').")
@@ -1033,7 +1042,7 @@ class LlmChatScreen(ModalScreen):
             if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
             self.messages.append({"role": "user", "content": text})
             la.agent_turn(self.messages, prov, model, key, base, emit, allow_gated=self.allow_gated, confirm=None, on_meta=set_meta)
-            la.session_save("tui", self.messages)
+            la.session_save(self.sess_key, self.messages)
         except Exception as e:
             w(f"[red]⚠ error: {e}[/]")
         finally:
