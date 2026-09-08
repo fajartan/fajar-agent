@@ -1074,7 +1074,7 @@ class LlmChatScreen(ModalScreen):
             log.write(f"[dim]  saran: “mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF”[/]")
             self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
         log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹/esc=stop · Ctrl+Q atau /quit=keluar · q di layar utama=tutup[/]")
-        log.write("[dim]📋 salin: drag mouse pilih teks → Ctrl+C   ·   🔗 URL: Ctrl+Click buka browser[/]")
+        log.write("[dim]📋 salin: pilih teks (mouse) → Ctrl+Shift+C · tempel Ctrl+Shift+V · 🔗 URL: Ctrl+Click[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
         inp.focus()
@@ -1428,7 +1428,7 @@ class BBTUI(App):
     CSS = CSS
     ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy — tanpa Shift/slash
     TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
-    BINDINGS = [("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
+    BINDINGS = [("ctrl+shift+c", "copy_text", "salin"), ("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
@@ -1537,6 +1537,12 @@ class BBTUI(App):
         cur = str(self.cfg.get("sort", "platform"))
         self.cfg["sort"] = order[(order.index(cur) + 1) % len(order)] if cur in order else "quiet"
         save_cfg(self.cfg); self.notify(f"urut: {self.cfg['sort']}"); self._render()
+    def action_copy_text(self):
+        # salin teks yg dipilih (drag mouse) ke clipboard — Ctrl+Shift+C
+        try: self.screen.action_copy_text()
+        except Exception:
+            try: self.copy_to_clipboard(self.screen.get_selected_text() or "")
+            except Exception: pass
     def action_help(self): self.push_screen(HelpScreen())
     def action_external(self):
         pr = self._selected(); self.push_screen(ExternalToolsScreen(self.cfg, apex(pr) if pr else ""))
