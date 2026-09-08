@@ -926,6 +926,7 @@ class LlmChatScreen(ModalScreen):
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
+        self.sess_start = datetime.datetime.now()
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
         # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
@@ -959,13 +960,16 @@ class LlmChatScreen(ModalScreen):
         dot = {"idle": "[green]●[/]", "checkpoint": "[yellow]⏸[/]", "auto-compact": "[magenta]⟳[/]"}.get(self.activity, "[cyan]◉[/]")
         act = "idle" if not self.busy and self.activity in ("idle", "checkpoint") else self.activity
         tok = f"⇅ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
-        tps = ""
-        if self.t0:
-            el = (datetime.datetime.now() - self.t0).total_seconds()
-            if el > 0: tps = f"  │  {el:.0f}s · {self.tok_out/el:.0f} t/s"
+        now = datetime.datetime.now()
+        if self.busy and self.t0:
+            el = (now - self.t0).total_seconds()
+            clock = f"  │  ⏱ {el:.0f}s · {self.tok_out/max(el,1):.0f} t/s"
+        else:
+            up = int((now - self.sess_start).total_seconds())
+            clock = f"  │  ⏱ sesi {up//60}m{up%60:02d}s"
         cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
-        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{tps}  │  giliran {self.turns}{cmp}  │  "
-                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/help · esc=stop · Ctrl+Q=keluar[/]")
+        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  giliran {self.turns}{cmp}  │  "
+                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
@@ -973,6 +977,8 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", RichLog)
         prov, model, _b, key = _llm_creds(self.cfg)
         la = _llm_mod()
+        self.window = la.model_window(model)          # ctx bar langsung tampil (0/window) sejak awal
+        self.set_interval(1.0, self._refresh_bars)    # jam sesi & elapsed hidup tiap detik
         # --- banner + identitas harness ---
         log.write(AGENT_BANNER)
         log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  ·  {AGENT_TAGLINE}")
