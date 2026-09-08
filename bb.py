@@ -14,6 +14,7 @@ Pakai:
   python3 bb.py llm --setup          simpan apikey/model LLM ke config
   python3 bb.py telegram             FAJAR-AGENT via Telegram (bot; butuh telegram_token+telegram_chat)
   python3 bb.py doctor               cek kesiapan tool
+  python3 bb.py update               perbarui FAJAR-AGENT ke versi terbaru (git pull / unduh arsip)
   python3 bb.py help
 
 Filter pencarian (env, dipakai find/pipeline; atau Settings di TUI):
@@ -31,7 +32,8 @@ TOOLS = os.path.join(D, "tools") if os.path.isdir(os.path.join(D, "tools")) else
 MAP = {"tui": "bbtui.py", "find": "daily-target-finder.py", "finder": "daily-target-finder.py",
        "recon": "recon.py", "monitor": "asset-monitor.py", "dedup": "dedup.py", "doctor": "doctor.py",
        "pipeline": "pipeline.py", "auto": "pipeline.py", "llm": "llm_agent.py", "ai": "llm_agent.py", "agent": "llm_agent.py",
-       "telegram": "telegram_bot.py", "tg": "telegram_bot.py", "bot": "telegram_bot.py"}
+       "telegram": "telegram_bot.py", "tg": "telegram_bot.py", "bot": "telegram_bot.py",
+       "update": "update.py", "upgrade": "update.py"}
 HELP = __doc__
 
 def main():
