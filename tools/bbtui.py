@@ -31,6 +31,7 @@ DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", 
                "min_sev": "", "min_efficiency": 0, "max_ttfr": 0, "max_ttb": 0, "min_quiet": 0, "sort": "platform",
                "enrich_provider": "jina",
                "firecrawl_api_key": "", "scraperapi_key": "", "serper_api_key": "", "h1_api_user": "", "h1_api_token": "",
+               "bugcrowd_api_token": "", "intigriti_api_token": "", "yeswehack_api_token": "",  # disimpan; authed-pull penuh baru H1
                "telegram_token": "", "telegram_chat": "", "discord_webhook": "",
                # Telegram bot FAJAR-AGENT (pakai token+chat di atas)
                "telegram_bot_enabled": False, "telegram_allow_active": False, "telegram_allowlist": "",
@@ -478,7 +479,8 @@ class SettingsScreen(ModalScreen):
         with VerticalScroll(id="stat"):
             yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] atau tombol Simpan = simpan · Enter di field = simpan · esc = batal TANPA simpan)", classes="title")
             yield Label("\n[b yellow]— KRITERIA PENCARIAN —[/]")
-            yield Label("Platform (pisah koma): hackerone,bugcrowd,yeswehack,intigriti,federacy · +disclose (2400+ program independen/VDP; tambahkan & matikan 'wajib wildcard' utk lihat)")
+            yield Label("Platform (6 sumber OTONOM, pisah koma): hackerone, bugcrowd, yeswehack, intigriti, federacy, disclose")
+            yield Label("[dim]disclose = 2400+ program independen/VDP (matikan 'wajib wildcard' utk lihat). Program PRIVATE H1 otomatis ikut bila h1 token diisi (🔒).[/]")
             yield Input(value=",".join(self.cfg.get("platforms", [])), id="plat")
             yield Label("Min bounty (0 = semua)")
             yield Input(value=str(self.cfg.get("min_bounty", 0)), id="minb")
@@ -518,6 +520,10 @@ class SettingsScreen(ModalScreen):
             yield Label("h1_api_user + token → tarik program yg BISA KAMU AKSES termasuk PRIVATE/invite (via API resmi H1). Buat token: hackerone.com/settings/api_token")
             yield Label("h1_api_user"); yield Input(value=self.cfg.get("h1_api_user", ""), id="h1u")
             yield Label("h1_api_token"); yield Input(value=self.cfg.get("h1_api_token", ""), id="h1t", password=True)
+            yield Label("[dim]Token platform lain (disimpan; auto-pull program-private penuh baru H1. BC/Intigriti/YWH pakai OAuth → dipakai enrichment/manual):[/]")
+            yield Label("bugcrowd_api_token"); yield Input(value=self.cfg.get("bugcrowd_api_token", ""), id="bct", password=True)
+            yield Label("intigriti_api_token"); yield Input(value=self.cfg.get("intigriti_api_token", ""), id="itt", password=True)
+            yield Label("yeswehack_api_token"); yield Input(value=self.cfg.get("yeswehack_api_token", ""), id="ywt", password=True)
             yield Label("\n[b yellow]— NOTIFIKASI —[/]")
             yield Label("Telegram bot token"); yield Input(value=self.cfg.get("telegram_token", ""), id="ntg", password=True)
             yield Label("Telegram chat id"); yield Input(value=self.cfg.get("telegram_chat", ""), id="ntc")
@@ -567,6 +573,7 @@ class SettingsScreen(ModalScreen):
             self.cfg["enrich_provider"] = g("prov") or "jina"
             self.cfg["firecrawl_api_key"] = g("fc"); self.cfg["serper_api_key"] = g("sp")
             self.cfg["h1_api_user"] = g("h1u"); self.cfg["h1_api_token"] = g("h1t")
+            self.cfg["bugcrowd_api_token"] = g("bct"); self.cfg["intigriti_api_token"] = g("itt"); self.cfg["yeswehack_api_token"] = g("ywt")
             self.cfg["telegram_token"] = g("ntg"); self.cfg["telegram_chat"] = g("ntc"); self.cfg["discord_webhook"] = g("ndc")
             self.cfg["telegram_bot_enabled"] = g("tgen").lower() == "y"
             self.cfg["telegram_allow_active"] = g("tgact").lower() == "y"

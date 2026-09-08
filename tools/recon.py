@@ -132,7 +132,38 @@ def main():
         # param mining
         if have("arjun"): sh(["arjun", "-u", f"https://{d}", "-oT", p("params.txt")], timeout=900)
 
+    # Firecrawl deep-crawl (map seluruh URL situs, JS-render) bila key ada — standard/deep
+    if a.profile in ("standard", "deep"):
+        n = firecrawl_map(d, p("firecrawl_urls.txt"))
+        if n: print(f"    [firecrawl] {n} URL ter-map (deep-crawl)")
+
     _summary(rec, d, a.profile)
+
+def _firecrawl_key():
+    k = os.environ.get("FIRECRAWL_API_KEY")
+    if k: return k
+    try:
+        c = json.load(open(os.path.expanduser("~/.config/bbtui/config.json"), encoding="utf-8"))
+        return c.get("firecrawl_api_key") or ""
+    except Exception:
+        return ""
+
+def firecrawl_map(domain, outfile):
+    """Firecrawl /v1/map — daftar seluruh URL situs (cepat, JS-aware). Return jumlah URL (0 bila tak ada key)."""
+    key = _firecrawl_key()
+    if not key: return 0
+    try:
+        body = json.dumps({"url": "https://" + domain, "limit": 2000}).encode()
+        req = urllib.request.Request("https://api.firecrawl.dev/v1/map", data=body,
+                                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+        r = json.loads(urllib.request.urlopen(req, timeout=120).read().decode("utf-8", "replace"))
+        links = r.get("links") or r.get("data") or []
+        urls = [l if isinstance(l, str) else (l.get("url") or "") for l in links]
+        urls = [u for u in urls if u]
+        open(outfile, "w", encoding="utf-8").write("\n".join(urls))
+        return len(urls)
+    except Exception as e:
+        print("    [firecrawl] gagal:", str(e)[:120]); return 0
 
 def _summary(rec, d, profile):
     def n(f):
