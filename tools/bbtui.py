@@ -1127,56 +1127,44 @@ class LlmChatScreen(ModalScreen):
         self.window = la.model_window(model)          # tebakan awal biar ctx bar langsung tampil
         self.set_interval(0.7, self._tick)            # jam sesi + animasi "loading" saat nunggu LLM
         self._load_window()                           # ambil window ASLI model dari provider (async)
-        with log.batch():   # SATU update+scroll utk seluruh intro (bukan ~30x)
-            # --- banner + identitas harness ---
-            log.write(AGENT_BANNER)
-            log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  -  {AGENT_TAGLINE}")
-            log.write(f"[dim]model:[/] [b]{model}[/] - [dim]provider:[/] {prov}   [dim]session:[/] {self.sid}")
-            log.write("[dim]" + "─" * 70 + "[/]")
-            # --- tools (real, dari registry) ---
+        with log.batch():   # SATU update+scroll utk seluruh intro
+            # Sengaja RINGKAS: daftar tools/skills itu materi rujukan, bukan info yang
+            # dibutuhkan tiap membuka sesi -> pindah ke /tools, /skills, /help.
             names = [t["name"] for t in la.TOOLS]
-            log.write("[b yellow]Tools[/]")
-            for grp, keys in TOOL_GROUPS:
-                have = [k for k in keys if k in names]
-                if have: log.write(f"  [dim]{grp}:[/] " + ", ".join(have))
-            # --- skills (real, dari SKILLS) + ext-tools ---
-            log.write("[b yellow]Skills[/] [dim](playbook framework — load_skill)[/]")
-            log.write("  " + ", ".join(la.SKILLS.keys()))
             nx = len(self.cfg.get("external_tools", {}))
-            log.write(f"[b yellow]Ext-tools[/] [dim](nuclei/burp/sqlmap/dll — run_ext_tool)[/]  {nx} terdaftar")
-            # --- ringkasan hitungan real ---
-            log.write("[dim]" + "─" * 70 + "[/]")
-            log.write(f"[b]{len(names)} tools[/] · [b]{len(la.SKILLS)} skills[/] · [b]{nx} ext-tools[/] · ketik [yellow]/help[/] utk perintah")
-            # --- status memori & sesi ---
             try:
                 mi = la.mem_list()
-                if mi and "kosong" not in mi: log.write(f"[dim]🧠 memori jangka panjang: {mi.count(chr(10))} entri (recall lintas sesi).[/]")
-            except Exception: pass
-            # --- alur & welcome ---
-            log.write("\n[cyan]Alur bertahap:[/] pilih target → recon → analisa/hipotesis → rencana → verifikasi → draf laporan → [b]submit=kamu[/]")
-            log.write("[cyan]✦ Tip:[/] tiap tahap berhenti di CHECKPOINT — ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
-            if not key: log.write("\n[red]⚠ belum ada API key.[/] Settings (s) → blok LLM AGENT, atau `bb.py llm --setup`.")
-            # --- TARGET terpilih: suntik konteks scope resmi (skema ekstraksi) ---
+                nmem = mi.count(chr(10)) if (mi and "kosong" not in mi) else 0
+            except Exception:
+                nmem = 0
+            log.write(AGENT_BANNER)
+            log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION} [dim]·[/] {AGENT_TAGLINE}")
+            log.write(f"[dim]{model} · {prov} · {len(names)} tools · {len(la.SKILLS)} skills · {nx} ext-tools"
+                      + (f" · {nmem} memori" if nmem else "") + "[/]")
+            log.write("[dim]ketik[/] [yellow]/help[/] [dim]perintah & tombol[/] [dim]·[/] "
+                      "[yellow]/tools[/] [yellow]/skills[/] [dim]daftar lengkap[/]")
+            if not key:
+                log.write("\n[red]⚠ belum ada API key[/] [dim]— Settings (s) → blok LLM AGENT[/]")
             inp = self.query_one("#chatinput", ChatBox)
             if self.target and key:
-                ctx = program_context(self.target)
                 self.messages = la.new_messages(prov == "anthropic")
-                self.messages.append({"role": "user", "content": ctx})   # sumber scope resmi utk model
+                self.messages.append({"role": "user", "content": program_context(self.target)})
                 g = classify_assets(self.target.get("scope", []))
                 present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
-                log.write(f"\n[b green]🎯 TARGET:[/] [b]{self.target.get('name')}[/] [{self.target.get('platform')}]  "
-                          f"- aset: {', '.join(present) or '-'}  - wildcard: {len(self.target.get('wild',[]))}  - sev: {self.target.get('maxsev','-')}")
-                log.write("[dim]💬 sesi chat BARU & bersih untuk target ini. Scope resmi sudah dimuat ke konteks.[/]")
+                nm = self.target.get("name")
+                # tanpa kurung siku: '[hackerone]' ditafsirkan Rich sebagai tag markup lalu dibuang
+                log.write(f"\n[b green]🎯 {nm}[/] [dim]· {self.target.get('platform')} · "
+                          f"{', '.join(present) or '-'} · wildcard {len(self.target.get('wild', []))} · "
+                          f"sev {self.target.get('maxsev', '-')}[/]")
                 prev = la.session_load(self.sess_key)
-                if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) -- ketik [b]/resume[/] untuk lanjutkan.[/]")
-                log.write("\n[b yellow]= AGENT BELUM JALAN -- menunggu perintahmu.[/]")
-                log.write("[dim]Tekan Enter (kotak kosong) untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
-                log.write(f"[dim]  saran: \"mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
-                self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
-            log.write("\n[dim]➤ [b]Enter[/]=kirim · [b]Alt+Enter[/] (atau Ctrl+J)=baris baru · ⏹/esc=stop · Ctrl+Q atau /quit=keluar[/]")
-            log.write("[dim]Kotak chat MULTI-BARIS & tinggi tetap: teks panjang membungkus di dalam kotak lalu digulir sendiri - layout tak bergerak. Gulir chat: Ctrl+PgUp / Ctrl+PgDn.[/]")
-            log.write("[dim]📋 salin: sorot teks dengan mouse → [b]Ctrl+C[/] · tempel [b]Ctrl+V[/] · 🔗 URL: Ctrl+Click[/]")
-            log.write("[dim]Butuh salinan panjang? [b]/export[/] simpan percakapan ke file .md.[/]")
+                if prev:
+                    log.write(f"[green]💾 sesi tersimpan ({len(prev)} pesan)[/] [dim]— ketik[/] [yellow]/resume[/]")
+                log.write("\n[b yellow]⏸ menunggu perintahmu[/] [dim]— Enter kirim · / menu[/]")
+                log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
+                self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
+                                 "HUNTING BRIEF sesuai jenis aset.")
+            else:
+                log.write("\n[dim]Enter kirim · / menu · Ctrl+Q keluar[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP...[/]"); self._mcp_connect()
         inp.focus()
@@ -1307,7 +1295,23 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", SelectableLog)
         parts = raw[1:].split(None, 1); cmd = parts[0].lower(); arg = parts[1].strip() if len(parts) > 1 else ""
         if cmd in ("help", "?", "h"):
-            log.write("[b cyan]Perintah slash:[/]"); [log.write(f"  [yellow]{c}[/] -- {d}") for c, d in SLASH_HELP]
+            # PERINTAH dulu, ringkasan TOMBOL/ALUR di AKHIR: log auto-scroll ke bawah,
+            # jadi bagian paling sering dibutuhkan yang tersisa di layar.
+            log.write("[b cyan]PERINTAH[/]")
+            for c, d in SLASH_HELP:
+                log.write(f"  [yellow]{c}[/] [dim]{d}[/]")
+            _n = chr(10)
+            log.write(
+                _n + "[b cyan]TOMBOL[/]" + _n +
+                "  [yellow]Enter[/] kirim   [yellow]Alt+Enter[/] baris baru   "
+                "[yellow]esc[/] stop   [yellow]Ctrl+Q[/] keluar" + _n +
+                "  [yellow]Ctrl+PgUp/PgDn[/] gulir chat   [yellow]F3[/] yolo   "
+                "[yellow]Ctrl+O[/] model   [yellow]Ctrl+R[/] resume   [yellow]Ctrl+L[/] bersihkan" + _n +
+                "  [yellow]Ctrl+C[/] salin tersorot   [yellow]Ctrl+V[/] tempel   "
+                "[yellow]Ctrl+Click[/] buka URL" + _n +
+                _n + "[b cyan]ALUR[/]  [dim]tiap tahap berhenti di CHECKPOINT — ketik[/] [b]lanjut[/]" + _n +
+                "  target → recon → analisa → rencana → verifikasi → draf laporan → [b]submit = kamu[/]" + _n +
+                "  [dim]aksi kirim-traffic perlu[/] [b]/yolo[/] [dim]ON[/]")
         elif cmd in ("yolo", "active", "a"): self.action_toggle_active()
         elif cmd == "model":
             if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); self._load_window(); log.write(f"[green]model -> {arg} (memuat context window...)[/]")
