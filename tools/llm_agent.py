@@ -239,6 +239,55 @@ def session_save(sid, messages):
     except Exception:
         return None
 
+def _msg_text(c):
+    """Ambil teks dari content yang bisa berupa str / list blok / dict."""
+    if isinstance(c, str): return c
+    if isinstance(c, list):
+        return " ".join(b.get("text", "") for b in c if isinstance(b, dict) and b.get("type") == "text")
+    if isinstance(c, dict): return str(c.get("content") or "")
+    return ""
+
+def session_list():
+    """Daftar SEMUA sesi tersimpan (terbaru dulu) untuk pemilih /resume.
+
+    Tiap entri: sid, path, saved, n (jumlah pesan), preview (pesan terakhir yg
+    bermakna -- blok TARGET CONTEXT/ARTEFAK dilewati karena bukan percakapan).
+    """
+    out = []
+    try:
+        names = os.listdir(SESS_DIR)
+    except Exception:
+        return out
+    for fn in names:
+        if not fn.endswith(".json"): continue
+        path = os.path.join(SESS_DIR, fn)
+        try:
+            d = json.load(open(path, encoding="utf-8"))
+        except Exception:
+            continue
+        msgs = d.get("messages") or []
+        preview = ""
+        for m in reversed(msgs):
+            if not isinstance(m, dict): continue
+            t = _msg_text(m.get("content")).strip()
+            if not t or t.startswith("[TARGET CONTEXT]") or t.startswith("[ARTEFAK"): continue
+            who = "kamu: " if m.get("role") == "user" else "agent: "
+            preview = who + " ".join(t.split())[:100]
+            break
+        out.append({"sid": fn[:-5], "path": path, "saved": d.get("saved", ""),
+                    "n": len(msgs), "preview": preview})
+    out.sort(key=lambda x: x.get("saved") or "", reverse=True)
+    return out
+
+def session_load_path(path):
+    """Muat sesi lewat path file (dipakai pemilih /resume)."""
+    try: return json.load(open(path, encoding="utf-8")).get("messages")
+    except Exception: return None
+
+def session_delete(path):
+    try: os.remove(path); return True
+    except Exception: return False
+
 def session_load(sid):
     try: return json.load(open(os.path.join(SESS_DIR, _slug(sid) + ".json"), encoding="utf-8")).get("messages")
     except Exception: return None

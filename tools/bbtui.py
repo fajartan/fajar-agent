@@ -508,6 +508,7 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: round $
 #chatinput { width: 1fr; height: 5; border: round $accent; scrollbar-size: 0 0; }
 #chatinput:focus { border: round $success; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
+#reslist { height: auto; max-height: 22; border: round $primary; margin: 1 0; }
 #slashbox { layer: pop; dock: bottom; offset: 0 -5; width: 100%; height: auto; max-height: 12; border: round $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
@@ -865,7 +866,7 @@ SLASH_HELP = [
     ("/help", "tampilkan daftar perintah"), ("/yolo", "toggle auto-approve aksi aktif (kirim traffic)"),
     ("/model [nama]", "ganti model (kosong = pilih dari daftar provider)"), ("/provider <anthropic|openai>", "ganti provider"),
     ("/new", "sesi baru (reset percakapan; memori tetap)"), ("/clear", "bersihkan layar chat"),
-    ("/resume", "lanjutkan sesi tersimpan terakhir"), ("/save", "simpan sesi sekarang"),
+    ("/resume", "pilih riwayat chat dari pop-up lalu lanjutkan"), ("/save", "simpan sesi sekarang"),
     ("/memory [cari]", "lihat/cari memori jangka panjang"), ("/skills", "daftar skill/playbook"),
     ("/skill install <nama> <url|path>", "pasang skill baru (playbook)"),
     ("/tools", "daftar tool yg dimiliki agent"), ("/stage", "ingatkan agent lanjut/lapor tahap"),
@@ -1275,13 +1276,24 @@ class LlmChatScreen(ModalScreen):
     def action_clear(self):
         self.query_one("#chatlog", SelectableLog).clear(); self.query_one("#chatlog", SelectableLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
     def action_resume(self):
-        msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", SelectableLog)
-        if not msgs: log.write("[yellow]tak ada sesi tersimpan.[/]"); return
+        self.app.push_screen(ResumePickerScreen(self._resume_pick, current=self.sess_key))
+    def _resume_pick(self, item):
+        la = _llm_mod(); log = self.query_one("#chatlog", SelectableLog)
+        msgs = la.session_load_path(item["path"])
+        if not msgs:
+            log.write("[yellow]riwayat itu kosong / gagal dibaca.[/]"); return
         self.messages = msgs
-        log.write("\n[dim]" + "-" * 60 + "[/]")
-        log.write(f"[b green]💾 SESI DILANJUTKAN[/] ({len(msgs)} pesan) -- riwayat di bawah, tinggal terus ketik:")
+        # ikut pindah sess_key: kelanjutan chat tersimpan ke riwayat YANG DIPILIH,
+        # bukan tercampur ke sesi target yang sedang dibuka.
+        self.sess_key = item["sid"]
+        self.turns = 0
+        log.write("\n[dim]" + "\u2500" * 60 + "[/]")
+        log.write(f"[b green]💾 melanjutkan riwayat[/] [b]{item['sid']}[/] "
+                  f"[dim]({len(msgs)} pesan · disimpan {(item.get('saved') or '')[:16].replace('T', ' ')})[/]")
         self._render_history(msgs)
-        log.write("[dim]" + "-" * 60 + "[/]")
+        log.write("[dim]" + "\u2500" * 60 + "[/]")
+        log.write("[dim]tinggal lanjut ketik. Simpanan berikutnya masuk ke riwayat ini.[/]")
+        self._refresh_bars()
     def _render_history(self, msgs):
         from rich.markup import escape
         log = self.query_one("#chatlog", SelectableLog)
@@ -1620,6 +1632,64 @@ class LlmChatScreen(ModalScreen):
             self.busy = False; self.activity = "idle"; self._worker = None
             self.app.call_from_thread(self._refresh_bars)
             self.app.call_from_thread(lambda: self.query_one("#chatinput", ChatBox).focus())
+
+class ResumePickerScreen(ModalScreen):
+    """Pop-up daftar riwayat chat tersimpan -> pilih mana yang mau dilanjutkan.
+
+    Sebelumnya /resume hanya memuat sesi milik target yang sedang dibuka, jadi kalau
+    kamu pindah target ia berkata "tak ada sesi tersimpan" walau riwayat lain ada.
+    Di sini SEMUA sesi ditampilkan (terbaru dulu) lengkap dgn jumlah pesan, waktu,
+    dan cuplikan pesan terakhir.
+    """
+    BINDINGS = [("escape", "app.pop_screen", "batal"), ("d", "hapus", "hapus"),
+                ("r", "muat_ulang", "refresh")]
+    def __init__(self, on_pick, current=None):
+        super().__init__(); self.on_pick = on_pick; self.current = current; self.items = []
+    def compose(self) -> ComposeResult:
+        with Vertical(id="stat"):
+            yield Label("[b cyan]RIWAYAT CHAT[/]  [dim]pilih sesi yang mau dilanjutkan[/]", classes="title")
+            yield OptionList(id="reslist")
+            yield Static("[dim]up/down pilih  ·  Enter lanjutkan  ·  d hapus  ·  esc batal[/]")
+    def on_mount(self):
+        self._reload()
+        try: self.query_one("#reslist", OptionList).focus()
+        except Exception: pass
+    def _reload(self):
+        from rich.markup import escape
+        box = self.query_one("#reslist", OptionList)
+        box.clear_options()
+        self.items = _llm_mod().session_list()
+        if not self.items:
+            box.add_option(Option("[dim](belum ada riwayat tersimpan)[/]", id="none"))
+            return
+        for i, it in enumerate(self.items):
+            nama = it["sid"]
+            if nama.startswith("tui-"): nama = nama[4:]
+            nama = nama.replace("-", " ").strip() or "(tanpa nama)"
+            waktu = (it.get("saved") or "")[:16].replace("T", " ")
+            kini = "  [b green]<- sedang dibuka[/]" if self.current and it["sid"] == self.current else ""
+            baris1 = f"[b]{i+1}. {escape(nama)}[/]{kini}   [dim]{it['n']} pesan · {waktu}[/]"
+            baris2 = "     [dim]" + escape(it.get("preview") or "(kosong)") + "[/]"
+            box.add_option(Option(baris1 + chr(10) + baris2, id=str(i)))
+        box.highlighted = 0
+    def action_muat_ulang(self): self._reload()
+    def _pilih(self):
+        box = self.query_one("#reslist", OptionList)
+        if box.highlighted is None or not self.items: return None
+        try: return self.items[box.highlighted]
+        except Exception: return None
+    def action_hapus(self):
+        it = self._pilih()
+        if not it: return
+        if _llm_mod().session_delete(it["path"]):
+            self.app.notify(f"riwayat dihapus: {it['sid']}")
+        else:
+            self.app.notify("gagal menghapus", severity="warning")
+        self._reload()
+    def on_option_list_option_selected(self, ev):
+        it = self._pilih()
+        self.app.pop_screen()
+        if it: self.on_pick(it)
 
 class SchedulerScreen(ModalScreen):
     """Scheduling: pasang/hapus cron pipeline harian dari dalam TUI (keyboard)."""
