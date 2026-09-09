@@ -475,25 +475,25 @@ def cron_active():
 CSS = """
 Screen { layout: vertical; background: $surface; }
 #body { height: 1fr; padding: 0 1; }
-#side { width: 32; padding: 1; border: ascii $primary; margin: 0 1 0 0; scrollbar-size: 0 0; }
+#side { width: 32; padding: 1; border: round $primary; margin: 0 1 0 0; scrollbar-size: 0 0; }
 #stat { height: auto; }
-#tablewrap { width: 2fr; border: ascii $primary; }
-#detail { width: 1fr; border: ascii $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
+#tablewrap { width: 2fr; border: round $primary; }
+#detail { width: 1fr; border: round $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
 DataTable { height: 1fr; background: $surface; scrollbar-size: 0 0; }
 DataTable > .datatable--header { text-style: bold; background: $primary; }
 DataTable > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
-#search { dock: bottom; display: none; border: ascii $accent; }
+#search { dock: bottom; display: none; border: round $accent; }
 #search.on { display: block; }
 .title { text-style: bold; color: $accent; }
 SplashScreen { align: center middle; }
-#splash { width: auto; height: auto; text-align: center; padding: 2 6; border: ascii $accent; background: $panel; }
+#splash { width: auto; height: auto; text-align: center; padding: 2 6; border: round $accent; background: $panel; }
 ModalScreen { align: center middle; }
-ModalScreen #stat { width: 84; max-height: 90%; border: ascii $accent; padding: 1 2; background: $panel; }
+ModalScreen #stat { width: 84; max-height: 90%; border: round $accent; padding: 1 2; background: $panel; }
 ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
-Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: ascii $primary; }
-#chatwrap { width: 100%; height: 100%; border: ascii $accent; background: $surface; layers: base pop; }
+Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: round $primary; }
+#chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; layers: base pop; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatscroll { height: 1fr; background: $surface; scrollbar-size: 0 0; }
 #chatlog { height: auto; padding: 0 1; }
@@ -503,20 +503,20 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: ascii $
 #thinklbl { width: auto; color: $accent; }
 #thinkbar { width: auto; color: $accent; padding: 0 0 0 1; }
 #chatbar { dock: bottom; height: 5; align-vertical: middle; }
-#chatinput { width: 1fr; height: 5; border: ascii $accent; scrollbar-size: 0 0; }
-#chatinput:focus { border: ascii $success; }
+#chatinput { width: 1fr; height: 5; border: round $accent; scrollbar-size: 0 0; }
+#chatinput:focus { border: round $success; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
-#slashbox { layer: pop; dock: bottom; offset: 0 -5; width: 100%; height: auto; max-height: 12; border: ascii $accent; background: $panel; display: none; }
+#slashbox { layer: pop; dock: bottom; offset: 0 -5; width: 100%; height: auto; max-height: 12; border: round $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
 
 BANNER = (
-    "######+ ######+ ########+##+   ##+##+\n"
-    "##+==##+##+==##++==##+==+##|   ##|##|\n"
-    "######++######++   ##|   ##|   ##|##|\n"
-    "##+==##+##+==##+   ##|   ##|   ##|##|\n"
-    "######++######++   ##|   +######++##|\n"
-    "+=====+ +=====+    +=+    +=====+ +=+"
+    "██████╗ ██████╗ ████████╗██╗   ██╗██╗\n"
+    "██╔══██╗██╔══██╗╚══██╔══╝██║   ██║██║\n"
+    "██████╔╝██████╔╝   ██║   ██║   ██║██║\n"
+    "██╔══██╗██╔══██╗   ██║   ██║   ██║██║\n"
+    "██████╔╝██████╔╝   ██║   ╚██████╔╝██║\n"
+    "╚═════╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝"
 )
 
 class SplashScreen(ModalScreen):
@@ -837,16 +837,16 @@ class ModelPickerScreen(ModalScreen):
 
 AGENT_NAME = "FAJAR-AGENT"
 AGENT_VERSION = "1.1"
-AGENT_TAGLINE = "Bug-Bounty Hunting Harness -- bertahap, memori jangka panjang, kontrol manusia"
+AGENT_TAGLINE = "Bug-Bounty Hunting Harness — bertahap, memori jangka panjang, kontrol manusia"
 # logo "FAJAR" gradasi sunrise (kuning -> oranye), diakhiri wordmark AGENT
 AGENT_BANNER = (
-    "[b #ffd23f]#######+ #####+      ##+ #####+ ######+ [/]\n"
-    "[b #ffb627]##+====+##+==##+     ##|##+==##+##+==##+[/]\n"
-    "[b #ff9e2c]#####+  #######|     ##|#######|######++[/]\n"
-    "[b #ff8c33]##+==+  ##+==##|##   ##|##+==##|##+==##+[/]\n"
-    "[b #ff7a3d]##|     ##|  ##|+#####++##|  ##|##|  ##|[/]\n"
-    "[b #ff6b45]+=+     +=+  +=+ +====+ +=+  +=++=+  +=+[/]\n"
-    "[dim]        🌅  A - G - E - N - T[/]"
+    "[b #ffd23f]███████╗ █████╗      ██╗ █████╗ ██████╗ [/]\n"
+    "[b #ffb627]██╔════╝██╔══██╗     ██║██╔══██╗██╔══██╗[/]\n"
+    "[b #ff9e2c]█████╗  ███████║     ██║███████║██████╔╝[/]\n"
+    "[b #ff8c33]██╔══╝  ██╔══██║██   ██║██╔══██║██╔══██╗[/]\n"
+    "[b #ff7a3d]██║     ██║  ██║╚█████╔╝██║  ██║██║  ██║[/]\n"
+    "[b #ff6b45]╚═╝     ╚═╝  ╚═╝ ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝[/]\n"
+    "[dim]        🌅  A · G · E · N · T[/]"
 )
 TOOL_GROUPS = [
     ("program", ["list_programs", "new_programs", "program_detail"]),
@@ -1030,9 +1030,9 @@ class LlmChatScreen(ModalScreen):
         # sesi di-key PER TARGET -> tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
         self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
-    THINK_KAO = ["(o_o)", "(*_*)", "(-_-)", "(o.O)", "(^_^)", "(>_<)", "(~_~)", "(=_=)"]
-    THINK_WORD = ["musing...", "berpikir...", "menganalisa...", "merangkai hipotesis...", "menimbang...",
-                  "meracik payload...", "menyusun rencana...", "menelusuri scope...", "brainstorming..."]
+    THINK_KAO = ["(°□°)", "(￣▽￣)", "( ˘•ω•˘ )", "(⌐■_■)", "(¬_¬ )", "(๑•̀ㅂ•́)و", "(°▽°)", "( •̀ ω •́ )"]
+    THINK_WORD = ["musing…", "berpikir…", "menganalisa…", "merangkai hipotesis…", "menimbang…",
+                  "meracik payload…", "menyusun rencana…", "menelusuri scope…", "brainstorming…"]
     def compose(self) -> ComposeResult:
         _p, _m, _b, key = _llm_creds(self.cfg)
         with Vertical(id="chatwrap"):
@@ -1045,37 +1045,37 @@ class LlmChatScreen(ModalScreen):
             yield Static(self._statusline(), id="chatstatus")
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
-                yield Button("#", id="btnstop", variant="error")
+                yield Button("⏹", id="btnstop", variant="error")
                 yield ChatBox(placeholder=("ketik goal atau /  --  Enter kirim, Alt+Enter baris baru" if key else "set API key dulu (Settings s)"), id="chatinput")
-                yield Button("> Kirim", id="btnsend", variant="success")
+                yield Button("➤ Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
         yolo = "[black on yellow] ⚡YOLO [/]" if self.allow_gated else "[dim]aktif:off[/]"
-        return f" < {AGENT_NAME} v{AGENT_VERSION} >  [b]{model}[/] - {prov}  -  [dim]{self.sid}[/]  {yolo}"
+        return f" ◤ {AGENT_NAME} v{AGENT_VERSION} ◢  [b]{model}[/] · {prov}  ·  [dim]{self.sid}[/]  {yolo}"
     @staticmethod
     def _h(n):
         return f"{n/1000:.1f}K" if n >= 1000 else str(int(n))
     def _ctxbar(self):
-        if not self.window: return "ctx --"
+        if not self.window: return "ctx —"
         pct = min(100, int(self.ctx * 100 / self.window))
         fill = pct * 10 // 100
         col = "green" if pct < 60 else ("yellow" if pct < 85 else "red")
-        bar = f"[{col}]" + "#" * fill + "[/]" + "." * (10 - fill)
+        bar = f"[{col}]" + "█" * fill + "[/]" + "░" * (10 - fill)
         return f"ctx {bar} {self._h(self.ctx)}/{self._h(self.window)} ({pct}%)"
     def _statusline(self):
-        dot = {"idle": "[green]*[/]", "checkpoint": "[yellow]=[/]", "auto-compact": "[magenta]~[/]"}.get(self.activity, "[cyan]o[/]")
+        dot = {"idle": "[green]●[/]", "checkpoint": "[yellow]⏸[/]", "auto-compact": "[magenta]⟳[/]"}.get(self.activity, "[cyan]◉[/]")
         act = "idle" if not self.busy and self.activity in ("idle", "checkpoint") else self.activity
-        tok = f"^ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
+        tok = f"⇅ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
         now = datetime.datetime.now()
         if self.busy and self.t0:
             el = (now - self.t0).total_seconds()
-            clock = f"  |  t {el:.0f}s - {self.tok_out/max(el,1):.0f} t/s"
+            clock = f"  │  ⏱ {el:.0f}s · {self.tok_out/max(el,1):.0f} t/s"
         else:
             up = int((now - self.sess_start).total_seconds())
-            clock = f"  |  t sesi {up//60}m{up%60:02d}s"
-        cmp = f"  |  [magenta]compactx{self.compacts}[/]" if self.compacts else ""
-        return (f"{dot} [b]{act}[/]  |  {self._ctxbar()}  |  {tok} tok{clock}  |  giliran {self.turns}{cmp}  |  "
-                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  |  [dim]/ menu - esc stop - ^Q keluar[/]")
+            clock = f"  │  ⏱ sesi {up//60}m{up%60:02d}s"
+        cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
+        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  giliran {self.turns}{cmp}  │  "
+                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
     @work(thread=True)
     def _load_window(self):
         try:  # override manual menang (llm_context di Settings; 0 = auto)
@@ -1115,8 +1115,8 @@ class LlmChatScreen(ModalScreen):
             lbl.update(f"[yellow]{kao}[/] [dim italic]{word}[/]")   # kaomoji + kata + bar di sebelah
             # bar berjalan, ASCII murni (lebar pasti 1 sel/karakter di semua terminal)
             n, blk, pos = 14, 3, self._tk % 14
-            cells = "".join("#" if any((pos + i) % n == j for i in range(blk)) else "-" for j in range(n))
-            bar.update(f"[[{cells}]]")   # [[ ]] = kurung literal di markup Rich
+            cells = "".join("█" if any((pos + i) % n == j for i in range(blk)) else "░" for j in range(n))
+            bar.update(f"[dim][[/dim]{cells}[dim]][/dim]")   # [[ ]] = kurung literal di markup Rich
             wrap.add_class("on")
         else:
             bar.update("")              # bar diam total saat idle: tak ada animasi/repaint
@@ -1133,7 +1133,7 @@ class LlmChatScreen(ModalScreen):
             log.write(AGENT_BANNER)
             log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  -  {AGENT_TAGLINE}")
             log.write(f"[dim]model:[/] [b]{model}[/] - [dim]provider:[/] {prov}   [dim]session:[/] {self.sid}")
-            log.write("[dim]" + "-" * 70 + "[/]")
+            log.write("[dim]" + "─" * 70 + "[/]")
             # --- tools (real, dari registry) ---
             names = [t["name"] for t in la.TOOLS]
             log.write("[b yellow]Tools[/]")
@@ -1141,22 +1141,22 @@ class LlmChatScreen(ModalScreen):
                 have = [k for k in keys if k in names]
                 if have: log.write(f"  [dim]{grp}:[/] " + ", ".join(have))
             # --- skills (real, dari SKILLS) + ext-tools ---
-            log.write("[b yellow]Skills[/] [dim](playbook framework -- load_skill)[/]")
+            log.write("[b yellow]Skills[/] [dim](playbook framework — load_skill)[/]")
             log.write("  " + ", ".join(la.SKILLS.keys()))
             nx = len(self.cfg.get("external_tools", {}))
-            log.write(f"[b yellow]Ext-tools[/] [dim](nuclei/burp/sqlmap/dll -- run_ext_tool)[/]  {nx} terdaftar")
+            log.write(f"[b yellow]Ext-tools[/] [dim](nuclei/burp/sqlmap/dll — run_ext_tool)[/]  {nx} terdaftar")
             # --- ringkasan hitungan real ---
-            log.write("[dim]" + "-" * 70 + "[/]")
-            log.write(f"[b]{len(names)} tools[/] - [b]{len(la.SKILLS)} skills[/] - [b]{nx} ext-tools[/] - ketik [yellow]/help[/] utk perintah")
+            log.write("[dim]" + "─" * 70 + "[/]")
+            log.write(f"[b]{len(names)} tools[/] · [b]{len(la.SKILLS)} skills[/] · [b]{nx} ext-tools[/] · ketik [yellow]/help[/] utk perintah")
             # --- status memori & sesi ---
             try:
                 mi = la.mem_list()
                 if mi and "kosong" not in mi: log.write(f"[dim]🧠 memori jangka panjang: {mi.count(chr(10))} entri (recall lintas sesi).[/]")
             except Exception: pass
             # --- alur & welcome ---
-            log.write("\n[cyan]Alur bertahap:[/] pilih target -> recon -> analisa/hipotesis -> rencana -> verifikasi -> draf laporan -> [b]submit=kamu[/]")
-            log.write("[cyan]* Tip:[/] tiap tahap berhenti di CHECKPOINT -- ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
-            if not key: log.write("\n[red]! belum ada API key.[/] Settings (s) -> blok LLM AGENT, atau `bb.py llm --setup`.")
+            log.write("\n[cyan]Alur bertahap:[/] pilih target → recon → analisa/hipotesis → rencana → verifikasi → draf laporan → [b]submit=kamu[/]")
+            log.write("[cyan]✦ Tip:[/] tiap tahap berhenti di CHECKPOINT — ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
+            if not key: log.write("\n[red]⚠ belum ada API key.[/] Settings (s) → blok LLM AGENT, atau `bb.py llm --setup`.")
             # --- TARGET terpilih: suntik konteks scope resmi (skema ekstraksi) ---
             inp = self.query_one("#chatinput", ChatBox)
             if self.target and key:
@@ -1174,7 +1174,7 @@ class LlmChatScreen(ModalScreen):
                 log.write("[dim]Tekan Enter (kotak kosong) untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
                 log.write(f"[dim]  saran: \"mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
                 self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
-            log.write("\n[dim]> [b]Enter[/]=kirim - [b]Alt+Enter[/] (atau Ctrl+J)=baris baru - #/esc=stop - Ctrl+Q atau /quit=keluar[/]")
+            log.write("\n[dim]➤ [b]Enter[/]=kirim · [b]Alt+Enter[/] (atau Ctrl+J)=baris baru · ⏹/esc=stop · Ctrl+Q atau /quit=keluar[/]")
             log.write("[dim]Kotak chat MULTI-BARIS & tinggi tetap: teks panjang membungkus di dalam kotak lalu digulir sendiri - layout tak bergerak. Gulir chat: Ctrl+PgUp / Ctrl+PgDn.[/]")
             log.write("[b yellow]📋 CARA SALIN yang pasti jalan:[/] tekan [b]F2[/] (MODE SALIN) -> sorot teks dengan mouse seperti teks biasa -> [b]Ctrl+Shift+C[/] -> [b]F2[/] lagi. Tempel: [b]Ctrl+Shift+V[/].")
             log.write("[dim]Di MODE SALIN, terminal yang menyeleksi (app melepas mouse) - bebas glitch. Gulir: PgUp/PgDn. Atau [b]/export[/] utk simpan percakapan ke file lalu salin dari sana.[/]")
@@ -1477,9 +1477,9 @@ class LlmChatScreen(ModalScreen):
     def _write_user(self, text):
         from rich.markup import escape
         # kotak hijau via garis, satu markup string (biar bisa diseleksi)
-        body = "\n".join("[green]|[/] " + escape(l) for l in text.splitlines())
+        body = "\n".join("[green]│[/] " + escape(l) for l in text.splitlines())
         self.query_one("#chatlog", SelectableLog).write(
-            f"\n[b green]> kamu[/]\n{body or '[green]|[/]'}")
+            f"\n[b green]▶ kamu[/]\n{body or '[green]│[/]'}")
     def _table_text(self, rows):
         from rich.markup import escape
         cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
@@ -1487,9 +1487,9 @@ class LlmChatScreen(ModalScreen):
         w = [len(h) for h in hdr]
         for row in data:
             for i, c in enumerate(row): w[i] = max(w[i], len(c))
-        line = lambda cs: " | ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
+        line = lambda cs: " │ ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
         out = ["  [b]" + escape(line(hdr)) + "[/]",
-               "  [dim]" + escape("-+-".join("-" * x for x in w)) + "[/]"]
+               "  [dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
         out += ["  " + escape(line(r)) for r in data]
         return "\n".join(out)
     def _write_agent(self, body):
