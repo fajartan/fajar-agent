@@ -944,6 +944,19 @@ class SelectableLog(Static):
     def clear(self):
         self._lines = []; self.update("")
 
+class ChatInput(Input):
+    """Input chat 1-baris: paste multi-baris DIGABUNG jadi satu baris (semua teks disimpan,
+    tak ada submit beruntun/freeze, tak buang baris ke-2 dst seperti Input bawaan)."""
+    def _on_paste(self, event):
+        # prevent_default() WAJIB: dispatch Textual memanggil _on_paste utk tiap kelas di MRO,
+        # jadi tanpa ini Input._on_paste base ikut jalan & menyisipkan baris-1 lagi (teks dobel).
+        event.stop(); event.prevent_default()
+        if event.text:
+            clean = " ".join(s.strip() for s in event.text.splitlines() if s.strip())
+            sel = self.selection
+            if sel.is_empty: self.insert_text_at_cursor(clean)
+            else: self.replace(clean, *sel)
+
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
     BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
@@ -974,7 +987,7 @@ class LlmChatScreen(ModalScreen):
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("⏹", id="btnstop", variant="error")
-                yield Input(placeholder=("ketik goal atau /  (daftar perintah)  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+                yield ChatInput(placeholder=("ketik goal atau /  (daftar perintah)  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
                 yield Button("➤ Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
