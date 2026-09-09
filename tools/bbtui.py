@@ -870,6 +870,8 @@ SLASH_HELP = [
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
     ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=#/esc)"),
     ("/redraw", "gambar ulang layar (bersihkan sisa render terminal; = esc)"),
+    ("/diag", "SIMPAN laporan diagnosa + screenshot ke ~/ (utk lapor bug render)"),
+    ("/export", "SIMPAN percakapan ke .md (salin dari file, tanpa seleksi di TUI)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
 
@@ -1152,6 +1154,42 @@ class LlmChatScreen(ModalScreen):
         except Exception: pass
         self.busy = False; self.activity = "idle"; self._refresh_bars()
         log.write("[yellow]# dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
+    def _diag(self):
+        log = self.query_one("#chatlog", SelectableLog)
+        rep = _diag_report(self.app)
+        txt = os.path.expanduser("~/fajar-diag.txt")
+        try:
+            with open(txt, "w", encoding="utf-8") as f:
+                f.write(rep + chr(10))
+        except Exception as e:
+            log.write("[red]gagal tulis %s: %s[/]" % (txt, e))
+            return
+        svg = os.path.expanduser("~/fajar-diag.svg")
+        try:
+            self.app.save_screenshot(svg)
+        except Exception:
+            svg = "(screenshot gagal)"
+        log.write("[b cyan]DIAG tersimpan[/]" + chr(10) + "  " + txt + chr(10) + "  " + svg)
+        log.write("[dim]" + rep.replace("[", "\\[") + "[/]")
+    def _export(self):
+        log = self.query_one("#chatlog", SelectableLog)
+        out = os.path.expanduser("~/fajar-chat-%s.md" % self.sid)
+        try:
+            with open(out, "w", encoding="utf-8") as f:
+                f.write("# Percakapan %s - %s" % (AGENT_NAME, self.sid) + chr(10) * 2)
+                for m in (self.messages or []):
+                    c = m.get("content")
+                    if not isinstance(c, str):
+                        c = json.dumps(c, ensure_ascii=False)[:4000]
+                    f.write("## %s" % m.get("role", "?") + chr(10) * 2 + c + chr(10) * 2)
+                f.write(chr(10) + "---" + chr(10) + "# Layar chat (teks mentah)" + chr(10) * 2)
+                for ln in log._lines:
+                    f.write(ln + chr(10))
+        except Exception as e:
+            log.write("[red]gagal export: %s[/]" % e)
+            return
+        log.write("[b green]percakapan diekspor:[/] " + out + chr(10) +
+                  "[dim]buka file itu lalu salin biasa - tak perlu seleksi di TUI.[/]")
     def action_soft_escape(self):
         # esc TIDAK langsung keluar. Sibuk -> stop. Tidak sibuk -> GAMBAR ULANG layar
         # (esc = refleks user saat layar berantakan) + ingatkan cara keluar, tanpa spam.
@@ -1267,6 +1305,8 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
         elif cmd == "redraw": self.app.action_redraw()
+        elif cmd == "diag": self._diag()
+        elif cmd == "export": self._export()
         elif cmd in ("quit", "exit", "q", "keluar"):
             if self.busy: self.action_stop()
             log.write("[dim]keluar sesi chat...[/]"); self.app.pop_screen()
@@ -1474,6 +1514,46 @@ class SchedulerScreen(ModalScreen):
     def action_remove(self):
         cron_remove(); self.query_one("#cronstat", Static).update(self._status()); self.app.notify("jadwal dihapus")
 
+def _diag_report(app):
+    """Laporan lingkungan utk mendiagnosa glitch render (user kirim ke maintainer)."""
+    import platform
+    L = []
+    L.append("== FAJAR-AGENT DIAG ==")
+    L.append("waktu       : " + datetime.datetime.now().isoformat(timespec="seconds"))
+    L.append("agent       : %s v%s" % (AGENT_NAME, AGENT_VERSION))
+    L.append("python      : %s  (%s)" % (sys.version.split()[0], platform.platform()))
+    for mod in ("textual", "rich"):
+        try:
+            import importlib.metadata as _md
+            L.append("%-12s: %s" % (mod, _md.version(mod)))
+        except Exception:
+            try:
+                L.append("%-12s: %s" % (mod, __import__(mod).__version__))
+            except Exception as e:
+                L.append("%-12s: ? (%s)" % (mod, e))
+    L.append("-- terminal --")
+    for k in ("TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "LANG", "LC_ALL",
+              "TMUX", "STY", "SSH_TTY", "SSH_CONNECTION", "DISPLAY", "WAYLAND_DISPLAY",
+              "WT_SESSION", "KONSOLE_VERSION", "VTE_VERSION", "ALACRITTY_WINDOW_ID",
+              "KITTY_WINDOW_ID", "GNOME_TERMINAL_SERVICE", "NO_COLOR", "TEXTUAL"):
+        v = os.environ.get(k)
+        if v:
+            L.append("  %s=%s" % (k, v))
+    try:
+        drv = getattr(app, "_driver", None)
+        L.append("driver      : %s" % (type(drv).__name__ if drv else None))
+        L.append("is_inline   : %s" % getattr(app, "is_inline", "?"))
+        L.append("ukuran app  : %sx%s" % (app.size.width, app.size.height))
+        L.append("screen_stack: %s -> %s" % (len(app.screen_stack),
+                                             [type(x).__name__ for x in app.screen_stack]))
+    except Exception as e:
+        L.append("app state   : err %s" % e)
+    L.append("-- clipboard --")
+    found = [c for c in ("wl-copy", "xclip", "xsel", "pbcopy") if shutil.which(c)]
+    L.append("  tool tersedia: %s" % (found or "TIDAK ADA (copy besar ditolak)"))
+    L.append("  trace aktif  : %s" % (getattr(app, "_trace_path", None) or "tidak (set FAJAR_TRACE=1)"))
+    return chr(10).join(L)
+
 def _clip_write(text):
     """Tulis ke clipboard OS lewat tool asli (TANPA escape terminal).
 
@@ -1514,7 +1594,30 @@ class BBTUI(App):
             yield VerticalScroll(Static("pilih program ->", id="detail"))
         yield Input(placeholder="cari nama/scope... (enter)", id="search")
         yield Footer(show_command_palette=False)
+    def _trace_on(self):
+        """FAJAR_TRACE=1 -> rekam SEMUA byte yg app tulis ke terminal (diagnosa glitch)."""
+        if str(os.environ.get("FAJAR_TRACE", "")).lower() not in ("1", "true", "yes", "on"):
+            return
+        drv = getattr(self, "_driver", None)
+        if drv is None:
+            return
+        path = os.path.expanduser("~/fajar-trace.bin")
+        try:
+            fh = open(path, "wb")
+        except Exception:
+            return
+        orig = drv.write
+        def w(x, *a, **k):
+            try:
+                fh.write(x.encode("utf-8", "replace") if isinstance(x, str) else bytes(x))
+                fh.flush()
+            except Exception:
+                pass
+            return orig(x, *a, **k)
+        drv.write = w
+        self._trace_path = path
     def on_mount(self):
+        self._trace_on()
         t = self.query_one("#tbl", DataTable)
         t.add_columns("Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
