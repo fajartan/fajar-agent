@@ -27,7 +27,7 @@ CFG_DIR = os.path.expanduser("~/.config/bbtui"); CFG = os.path.join(CFG_DIR, "co
 SEEN = os.path.join(CFG_DIR, "seen.json")  # baseline utk deteksi PROGRAM BARU antar sesi
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", "federacy"],
-               "require_wildcard": True, "min_bounty": 0, "asset_type": "",
+               "require_wildcard": True, "min_bounty": 0, "asset_type": "", "mouse": True,
                # kriteria lanjutan (0/""/any = abaikan)
                "min_assets": 0, "max_assets": 0, "min_wildcards": 0, "managed_filter": "any",
                "min_sev": "", "min_efficiency": 0, "max_ttfr": 0, "max_ttb": 0, "min_quiet": 0, "sort": "platform",
@@ -977,7 +977,9 @@ class ChatInput(Input):
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code -- status bar, slash-commands, alur BERTAHAP rapi."""
     BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
-                ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear")]
+                ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear"),
+                ("pageup", "log_up", "gulir naik"), ("pagedown", "log_down", "gulir turun"),
+                ("ctrl+home", "log_home", "atas"), ("ctrl+end", "log_end", "bawah")]
     def __init__(self, cfg, target=None):
         super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
@@ -1133,7 +1135,8 @@ class LlmChatScreen(ModalScreen):
                 log.write(f"[dim]  saran: \"mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
                 self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
             log.write("\n[dim]> Kirim/Enter=mulai - #/esc=stop - Ctrl+Q atau /quit=keluar - q di layar utama=tutup[/]")
-            log.write("[dim]📋 salin: pilih teks (mouse) -> Ctrl+C - tempel Ctrl+Shift+V - 🔗 URL: Ctrl+Click[/]")
+            log.write("[b yellow]📋 CARA SALIN yang pasti jalan:[/] tekan [b]F2[/] (MODE SALIN) -> sorot teks dengan mouse seperti teks biasa -> [b]Ctrl+Shift+C[/] -> [b]F2[/] lagi. Tempel: [b]Ctrl+Shift+V[/].")
+            log.write("[dim]Di MODE SALIN, terminal yang menyeleksi (app melepas mouse) - bebas glitch. Gulir: PgUp/PgDn. Atau [b]/export[/] utk simpan percakapan ke file lalu salin dari sana.[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP...[/]"); self._mcp_connect()
         inp.focus()
@@ -1154,6 +1157,20 @@ class LlmChatScreen(ModalScreen):
         except Exception: pass
         self.busy = False; self.activity = "idle"; self._refresh_bars()
         log.write("[yellow]# dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
+    def _scroller(self):
+        return self.query_one("#chatscroll")
+    def action_log_up(self):
+        try: self._scroller().scroll_page_up(animate=False)
+        except Exception: pass
+    def action_log_down(self):
+        try: self._scroller().scroll_page_down(animate=False)
+        except Exception: pass
+    def action_log_home(self):
+        try: self._scroller().scroll_home(animate=False)
+        except Exception: pass
+    def action_log_end(self):
+        try: self._scroller().scroll_end(animate=False)
+        except Exception: pass
     def _diag(self):
         log = self.query_one("#chatlog", SelectableLog)
         rep = _diag_report(self.app)
@@ -1581,7 +1598,8 @@ class BBTUI(App):
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
-                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("ctrl+l", "redraw", "redraw"), ("escape", "clear_search", "")]
+                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("ctrl+l", "redraw", "redraw"),
+                Binding("f2", "mouse_toggle", "mode salin", key_display="F2"), ("escape", "clear_search", "")]
     def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, icon="*")
@@ -1709,6 +1727,38 @@ class BBTUI(App):
         cur = str(self.cfg.get("sort", "platform"))
         self.cfg["sort"] = order[(order.index(cur) + 1) % len(order)] if cur in order else "quiet"
         save_cfg(self.cfg); self.notify(f"urut: {self.cfg['sort']}"); self._render()
+    def action_mouse_toggle(self):
+        """F2: lepas/ambil mouse dari terminal.
+
+        MODE SALIN (mouse dilepas) = app TIDAK mengirim escape mouse, jadi terminal
+        menyeleksi teks secara NATIVE seperti teks biasa dan Ctrl+Shift+C milik terminal
+        yang menyalin. App sama sekali tak terlibat -> tak ada OSC52, tak ada render
+        seleksi, tak ada yang bisa merusak layar.
+        """
+        drv = getattr(self, "_driver", None)
+        if drv is None:
+            self.notify("driver belum siap"); return
+        self._mouse_app = not getattr(self, "_mouse_app", True)
+        # mode 1000/1003/1015/1006: h = app ambil mouse, l = lepas ke terminal.
+        # pakai method driver bila ada; kalau tidak, tulis escape-nya langsung.
+        suffix = "h" if self._mouse_app else "l"
+        meth = getattr(drv, "_enable_mouse_support" if self._mouse_app else "_disable_mouse_support", None)
+        try:
+            if callable(meth):
+                meth()
+            else:
+                drv.write("".join("\x1b[?%d%s" % (m, suffix) for m in (1000, 1003, 1015, 1006)))
+                try: drv.flush()
+                except Exception: pass
+        except Exception as e:
+            self.notify("gagal ganti mode mouse: %s" % e, severity="warning")
+            return
+        if self._mouse_app:
+            self.notify("MOUSE APP aktif - klik tombol/tabel jalan. Tekan F2 utk MODE SALIN.", timeout=6)
+        else:
+            self.notify("MODE SALIN aktif - sorot teks seperti terminal biasa, "
+                        "salin Ctrl+Shift+C, tempel Ctrl+Shift+V. F2 utk kembali.", timeout=10)
+        self.action_redraw()
     def action_redraw(self):
         # Gambar ulang SELURUH layar (bukan diff). Textual normalnya hanya menulis sel yang
         # BERUBAH; kalau terminal sempat ter-scroll/desync, sel basi tak pernah ditimpa ->
@@ -1814,7 +1864,15 @@ class BBTUI(App):
     def action_settings(self): self.push_screen(SettingsScreen(self.cfg))
 
 if __name__ == "__main__":
+    # mouse=False -> app TIDAK mengirim escape mouse sama sekali: seleksi & Ctrl+Shift+C
+    # sepenuhnya milik terminal (bebas glitch), tombol/tabel jadi keyboard-only.
+    _mouse = True
+    if "--no-mouse" in sys.argv:
+        _mouse = False
+    else:
+        try: _mouse = bool(load_cfg().get("mouse", True))
+        except Exception: _mouse = True
     try:
-        BBTUI().run()
+        BBTUI().run(mouse=_mouse)
     except KeyboardInterrupt:
         pass   # keluar bersih tanpa traceback (Ctrl+C)
