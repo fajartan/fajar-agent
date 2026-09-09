@@ -493,7 +493,8 @@ ModalScreen #stat Static { width: 100%; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
-#chatlog { height: 1fr; padding: 0 1; background: $surface; }
+#chatscroll { height: 1fr; background: $surface; }
+#chatlog { height: auto; padding: 0 1; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
 #thinkwrap { height: 1; padding: 0 1; display: none; }
 #thinkwrap.on { display: block; }
@@ -927,6 +928,21 @@ def _md_line(raw):
     body = _re.sub(r"^(\s*)[-*]\s+", r"\1• ", body)
     return inline(body)
 
+class SelectableLog(Static):
+    """Kotak chat yg BISA DISELEKSI. Static hanya bisa diseleksi jika kontennya SATU markup string
+    (bukan Group/Panel/Table). Jadi semua ditumpuk jadi satu string markup. auto-scroll ke bawah."""
+    ALLOW_SELECT = True
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k); self._lines = []
+    def write(self, s=""):
+        self._lines.append(s if isinstance(s, str) else str(s))
+        if len(self._lines) > 800: self._lines = self._lines[-800:]
+        self.update("\n".join(self._lines))
+        try: self.parent.scroll_end(animate=False)
+        except Exception: pass
+    def clear(self):
+        self._lines = []; self.update("")
+
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
     BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
@@ -948,7 +964,8 @@ class LlmChatScreen(ModalScreen):
         _p, _m, _b, key = _llm_creds(self.cfg)
         with Vertical(id="chatwrap"):
             yield Static(self._headerline(), id="chathdr")
-            yield RichLog(highlight=True, markup=True, wrap=True, id="chatlog")
+            with VerticalScroll(id="chatscroll"):
+                yield SelectableLog(id="chatlog", markup=True)
             with Horizontal(id="thinkwrap"):    # indikator loading DI ATAS baris info
                 yield Static("⏳ memproses", id="thinklbl")
                 yield ProgressBar(id="thinking", show_percentage=False, show_eta=False)
@@ -1022,7 +1039,7 @@ class LlmChatScreen(ModalScreen):
         else:
             wrap.remove_class("on")
     def on_mount(self):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         prov, model, _b, key = _llm_creds(self.cfg)
         la = _llm_mod()
         self.window = la.model_window(model)          # tebakan awal biar ctx bar langsung tampil
@@ -1087,7 +1104,7 @@ class LlmChatScreen(ModalScreen):
         elif ev.button.id == "btnstop":
             self.action_stop()
     def action_stop(self):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         if not self.busy:
             log.write("[dim]tak ada proses berjalan.[/]"); return
         try:
@@ -1098,7 +1115,7 @@ class LlmChatScreen(ModalScreen):
     def action_soft_escape(self):
         # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan cara keluar
         if self.busy: self.action_stop()
-        else: self.query_one("#chatlog", RichLog).write("[dim]keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/]. (esc sengaja tidak menutup agar tak salah pencet)[/]")
+        else: self.query_one("#chatlog", SelectableLog).write("[dim]keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/]. (esc sengaja tidak menutup agar tak salah pencet)[/]")
     def action_quit_chat(self):
         if self.busy: self.action_stop()
         self._autosave()
@@ -1113,14 +1130,14 @@ class LlmChatScreen(ModalScreen):
     # ---- actions ----
     def action_toggle_active(self):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
-        self.query_one("#chatlog", RichLog).write(f"[b]{'🟢 YOLO ON — aksi kirim-traffic diizinkan' if self.allow_gated else '🔴 YOLO OFF — aksi aktif ditolak'}[/]")
+        self.query_one("#chatlog", SelectableLog).write(f"[b]{'🟢 YOLO ON — aksi kirim-traffic diizinkan' if self.allow_gated else '🔴 YOLO OFF — aksi aktif ditolak'}[/]")
     def action_pick_model(self):
         def picked(mdl): self._refresh_bars(); self._load_window()   # window ikut model baru
         self.app.push_screen(ModelPickerScreen(self.cfg, picked))
     def action_clear(self):
-        self.query_one("#chatlog", RichLog).clear(); self.query_one("#chatlog", RichLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
+        self.query_one("#chatlog", SelectableLog).clear(); self.query_one("#chatlog", SelectableLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
     def action_resume(self):
-        msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", RichLog)
+        msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", SelectableLog)
         if not msgs: log.write("[yellow]tak ada sesi tersimpan.[/]"); return
         self.messages = msgs
         log.write("\n[dim]" + "─" * 60 + "[/]")
@@ -1129,7 +1146,7 @@ class LlmChatScreen(ModalScreen):
         log.write("[dim]" + "─" * 60 + "[/]")
     def _render_history(self, msgs):
         from rich.markup import escape
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         for msg in msgs:
             role = msg.get("role"); c = msg.get("content")
             if role == "user" and isinstance(c, str):
@@ -1145,7 +1162,7 @@ class LlmChatScreen(ModalScreen):
             # pesan tool/tool_result (internal) dilewati agar transkrip bersih
     # ---- slash commands ----
     def _slash(self, raw):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         parts = raw[1:].split(None, 1); cmd = parts[0].lower(); arg = parts[1].strip() if len(parts) > 1 else ""
         if cmd in ("help", "?", "h"):
             log.write("[b cyan]Perintah slash:[/]"); [log.write(f"  [yellow]{c}[/] — {d}") for c, d in SLASH_HELP]
@@ -1210,7 +1227,7 @@ class LlmChatScreen(ModalScreen):
         else: log.write(f"[yellow]perintah '/{cmd}' tak dikenal. /help utk daftar.[/]")
     @work(thread=True)
     def _mcp_connect(self):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         try:
             rep = _llm_mod().mcp_connect_all(self.cfg)
             for line in rep: self.app.call_from_thread(log.write, "  [dim]MCP • " + line + "[/]")
@@ -1218,7 +1235,7 @@ class LlmChatScreen(ModalScreen):
         except Exception as e:
             self.app.call_from_thread(log.write, f"[red]MCP gagal: {e}[/]")
     def _ingest_path(self, raw):
-        la = _llm_mod(); log = self.query_one("#chatlog", RichLog)
+        la = _llm_mod(); log = self.query_one("#chatlog", SelectableLog)
         p = os.path.expanduser(raw.strip().strip('"').strip("'"))
         if os.path.isdir(p): content = la.t_ingest_folder(p); label = f"FOLDER {p}"
         elif os.path.isfile(p): content = la.t_read_file(p); label = f"FILE {p}"
@@ -1285,7 +1302,7 @@ class LlmChatScreen(ModalScreen):
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
     def _submit(self, text):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         if text.startswith("/"): self._slash(text); return          # slash SELALU jalan (walau sibuk)
         if self.busy:
             log.write("[yellow]⏳ agent masih memproses — tunggu CHECKPOINT, atau tekan ⏹/esc untuk stop.[/]"); return
@@ -1302,52 +1319,39 @@ class LlmChatScreen(ModalScreen):
         s = l.strip().strip("|")
         return bool(s) and all(set(c.strip()) <= set("-:") and c.strip() for c in s.split("|"))
     def _write_user(self, text):
-        from rich.panel import Panel
-        from rich.text import Text
-        log = self.query_one("#chatlog", RichLog)
-        log.write("")
-        log.write(Panel(Text(text), title="▶ kamu", title_align="left", border_style="green", padding=(0, 1)))
-    def _build_table(self, rows):
-        from rich.table import Table
+        from rich.markup import escape
+        # kotak hijau via garis, satu markup string (biar bisa diseleksi)
+        body = "\n".join("[green]│[/] " + escape(l) for l in text.splitlines())
+        self.query_one("#chatlog", SelectableLog).write(
+            f"\n[b green]▶ kamu[/]\n{body or '[green]│[/]'}")
+    def _table_text(self, rows):
         from rich.markup import escape
         cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
-        hdr = cells(rows[0])
-        t = Table(show_header=True, header_style="bold", border_style="grey50", pad_edge=False, expand=False)
-        for h in hdr: t.add_column(escape(h) or " ")
-        for r in rows[1:]:
-            cs = (cells(r) + [""] * len(hdr))[:len(hdr)]
-            t.add_row(*[escape(c) for c in cs])
-        return t
+        hdr = cells(rows[0]); data = [(cells(r) + [""] * len(hdr))[:len(hdr)] for r in rows[1:]]
+        w = [len(h) for h in hdr]
+        for row in data:
+            for i, c in enumerate(row): w[i] = max(w[i], len(c))
+        line = lambda cs: " │ ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
+        out = ["  [b]" + escape(line(hdr)) + "[/]",
+               "  [dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
+        out += ["  " + escape(line(r)) for r in data]
+        return "\n".join(out)
     def _write_agent(self, body):
-        # jawaban agent DALAM KOTAK (panel); proses tool tetap di luar (dim). Warna tenang.
-        from rich.panel import Panel
-        from rich.console import Group
-        from rich.text import Text
-        self._last_agent = body   # utk /copy
-        log = self.query_one("#chatlog", RichLog)
-        parts = []; lines = body.splitlines(); n = len(lines); i = 0; para = []
-        def flush():
-            if not para: return
-            t = Text()
-            for k, ln in enumerate(para):
-                if k: t.append("\n")
-                if "CHECKPOINT" in ln:
-                    t.append("➤ " + ln.strip().lstrip("#").strip(), style="bold cyan")
-                else:
-                    try: t.append_text(Text.from_markup(_md_line(ln)))
-                    except Exception: t.append(ln)
-            parts.append(t); para.clear()
+        self._last_agent = body
+        out = ["\n[b cyan]🤖 agent[/]"]
+        lines = body.splitlines(); n = len(lines); i = 0
         while i < n:
             if self._is_row(lines[i]) and i + 1 < n and self._is_sep(lines[i + 1]):
-                flush(); j = i + 2
+                j = i + 2
                 while j < n and self._is_row(lines[j]) and not self._is_sep(lines[j]): j += 1
-                parts.append(self._build_table([lines[i]] + lines[i + 2:j])); i = j
+                out.append(self._table_text([lines[i]] + lines[i + 2:j])); i = j
             else:
-                para.append(lines[i]); i += 1
-        flush()
-        inner = Group(*parts) if parts else Text("")
-        log.write("")
-        log.write(Panel(inner, title="🤖 agent", title_align="left", border_style="cyan", padding=(0, 1)))
+                ln = lines[i]
+                if not ln.strip(): out.append("")
+                elif "CHECKPOINT" in ln: out.append("  [black on cyan] " + ln.strip().lstrip("#").strip() + " [/]")
+                else: out.append("  " + _md_line(ln))
+                i += 1
+        self.query_one("#chatlog", SelectableLog).write("\n".join(out))
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
@@ -1356,7 +1360,7 @@ class LlmChatScreen(ModalScreen):
         self._worker = self._run_stage(text, prov, model, base, key)
     @work(thread=True)
     def _do_compact(self, prov, model, base, key):
-        la = _llm_mod(); log = self.query_one("#chatlog", RichLog)
+        la = _llm_mod(); log = self.query_one("#chatlog", SelectableLog)
         before = la.estimate_ctx(self.messages)
         self.messages[:] = la.compact(self.messages, prov, model, key, base)
         self.ctx = la.estimate_ctx(self.messages); self.compacts += 1
@@ -1364,7 +1368,7 @@ class LlmChatScreen(ModalScreen):
         self.app.call_from_thread(self._refresh_bars)
     @work(thread=True)
     def _run_stage(self, text, prov, model, base, key):
-        log = self.query_one("#chatlog", RichLog)
+        log = self.query_one("#chatlog", SelectableLog)
         def w(line): self.app.call_from_thread(log.write, line)
         def set_meta(d):
             if "activity" in d: self.activity = d["activity"]
