@@ -225,11 +225,19 @@ def mem_digest(max_chars=2500):
 
 # ---------------- persistensi sesi (resume percakapan panjang) ----------------
 def session_save(sid, messages):
+    """Simpan sesi. Kembalikan PATH bila sukses, None bila gagal.
+
+    Sengaja tidak melempar exception (dipakai di jalur autosave), tapi hasilnya
+    dikembalikan supaya pemanggil bisa melaporkan kegagalan alih-alih diam saja.
+    """
     try:
         os.makedirs(SESS_DIR, exist_ok=True)
-        json.dump({"saved": datetime.datetime.now().isoformat(), "messages": messages},
-                  open(os.path.join(SESS_DIR, _slug(sid) + ".json"), "w", encoding="utf-8"))
-    except Exception: pass
+        path = os.path.join(SESS_DIR, _slug(sid) + ".json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"saved": datetime.datetime.now().isoformat(), "messages": messages}, fh)
+        return path
+    except Exception:
+        return None
 
 def session_load(sid):
     try: return json.load(open(os.path.join(SESS_DIR, _slug(sid) + ".json"), encoding="utf-8")).get("messages")

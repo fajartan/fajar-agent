@@ -137,11 +137,13 @@ def types_of(pr):
     return t or {"other"}
 
 def reward(pr):
-    c = pr.get("cur", "$"); lo, hi = pr["bounty_min"], pr["bounty_max"]
+    # pakai .get(): program dari sumber non-standar (disclose/private/manual) bisa
+    # kekurangan field, dan KeyError di sini mematikan /new + pembukaan layar chat.
+    c = pr.get("cur", "$"); lo, hi = pr.get("bounty_min"), pr.get("bounty_max")
     if lo is not None and hi is not None: return f"{c}{lo}-{c}{hi}"
     if hi is not None: return f"<={c}{hi}"
     if lo is not None: return f">={c}{lo}"
-    return "bounty" if pr["bounty"] else "-"
+    return "bounty" if pr.get("bounty") else "-"
 
 def norm(pf, p):
     if pf == "hackerone":
@@ -1094,7 +1096,7 @@ class LlmChatScreen(ModalScreen):
             if w and w > 0:
                 self.window = w
                 self.app.call_from_thread(self._refresh_bars)
-        except Exception:
+        except (Exception, SystemExit):
             pass
     def _refresh_bars(self):
         self.query_one("#chathdr", Static).update(self._headerline())
@@ -1259,9 +1261,11 @@ class LlmChatScreen(ModalScreen):
         self._autosave()
         self.app.pop_screen()
     def _autosave(self):
+        """Simpan sesi tanpa berisik. Kembalikan path bila sukses, None bila tidak."""
         try:
-            if self.messages: _llm_mod().session_save(self.sess_key, self.messages)
+            if self.messages: return _llm_mod().session_save(self.sess_key, self.messages)
         except Exception: pass
+        return None
     def on_unmount(self):
         # jaminan simpan saat layar chat ditutup / app keluar tiba-tiba (chat terakhir tersimpan)
         self._autosave()
@@ -1307,7 +1311,9 @@ class LlmChatScreen(ModalScreen):
         elif cmd in ("yolo", "active", "a"): self.action_toggle_active()
         elif cmd == "model":
             if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); self._load_window(); log.write(f"[green]model -> {arg} (memuat context window...)[/]")
-            else: self.action_pick_model()
+            else:
+                log.write("[dim]membuka daftar model dari provider... (esc utk batal)[/]")
+                self.action_pick_model()
         elif cmd == "provider":
             if arg in ("anthropic", "openai"):
                 self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider -> {arg}[/]")
@@ -1321,11 +1327,20 @@ class LlmChatScreen(ModalScreen):
                 log.write(f"[b]-- sesi baru untuk {self.target.get('name')} --[/] [dim](scope target dimuat ulang; memori tetap)[/]")
             else:
                 log.write("[b]-- sesi baru --[/] [dim](memori jangka panjang tetap)[/]")
-        elif cmd == "clear": self.action_clear()
+        elif cmd == "clear":
+            self.action_clear(); log.write("[dim]layar chat dibersihkan (riwayat sesi TETAP tersimpan).[/]")
         elif cmd == "resume": self.action_resume()
         elif cmd == "save":
-            if self.messages: _llm_mod().session_save(self.sess_key, self.messages); log.write("[green]sesi disimpan.[/]")
-            else: log.write("[yellow]belum ada percakapan.[/]")
+            if not self.messages:
+                log.write("[yellow]belum ada percakapan untuk disimpan.[/]")
+            else:
+                path = self._autosave()
+                if path:
+                    log.write(f"[green]sesi disimpan[/] ({len(self.messages)} pesan) [dim]-> {path}[/]"
+                              f"\n[dim]Sesi juga TERSIMPAN OTOMATIS tiap selesai satu turn dan saat kamu keluar. "
+                              f"Buka lagi dengan [b]/resume[/].[/]")
+                else:
+                    log.write("[red]GAGAL menyimpan sesi[/] [dim](cek izin tulis ~/.config/bbtui/agent-sessions)[/]")
         elif cmd == "memory":
             out = _llm_mod().mem_search(arg) if arg else _llm_mod().mem_list()
             log.write("[b cyan]🧠 memori:[/]\n" + out[:1500])
@@ -1359,8 +1374,12 @@ class LlmChatScreen(ModalScreen):
             log.write("[magenta]~ meringkas konteks...[/]"); self._do_compact(p, mdl, base, k)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
-        elif cmd == "redraw": self.app.action_redraw()
-        elif cmd == "mouse": self.app.action_mouse_toggle()
+        elif cmd == "redraw":
+            self.app.action_redraw(); log.write("[dim]layar digambar ulang penuh.[/]")
+        elif cmd == "mouse":
+            self.app.action_mouse_toggle()
+            on = getattr(self.app, "_mouse_app", True)
+            log.write("[dim]mouse: " + ("dipegang APP (klik tombol jalan)" if on else "dilepas ke TERMINAL (seleksi teks native)") + ".[/]")
         elif cmd == "diag": self._diag()
         elif cmd == "export": self._export()
         elif cmd in ("quit", "exit", "q", "keluar"):
@@ -1535,11 +1554,17 @@ class LlmChatScreen(ModalScreen):
     @work(thread=True)
     def _do_compact(self, prov, model, base, key):
         la = _llm_mod(); log = self.query_one("#chatlog", SelectableLog)
-        before = la.estimate_ctx(self.messages)
-        self.messages[:] = la.compact(self.messages, prov, model, key, base)
-        self.ctx = la.estimate_ctx(self.messages); self.compacts += 1
-        self.app.call_from_thread(log.write, f"[magenta]v konteks diringkas: ~{before} -> ~{self.ctx} tok.[/]")
-        self.app.call_from_thread(self._refresh_bars)
+        # PENTING: _http_json melempar SystemExit (turunan BaseException), jadi
+        # 'except Exception' TIDAK menangkapnya. Tanpa penjaga ini, error API bikin
+        # worker menabrak dgn traceback alih-alih pesan ramah.
+        try:
+            before = la.estimate_ctx(self.messages)
+            self.messages[:] = la.compact(self.messages, prov, model, key, base)
+            self.ctx = la.estimate_ctx(self.messages); self.compacts += 1
+            self.app.call_from_thread(log.write, f"[magenta]v konteks diringkas: ~{before} -> ~{self.ctx} tok.[/]")
+            self.app.call_from_thread(self._refresh_bars)
+        except (Exception, SystemExit) as e:
+            self.app.call_from_thread(log.write, f"[red]! gagal meringkas konteks: {e}[/]")
     @work(thread=True)
     def _run_stage(self, text, prov, model, base, key):
         log = self.query_one("#chatlog", SelectableLog)
@@ -1572,10 +1597,14 @@ class LlmChatScreen(ModalScreen):
             if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
             self.messages.append({"role": "user", "content": text})
             la.agent_turn(self.messages, prov, model, key, base, emit, allow_gated=self.allow_gated, confirm=None, on_meta=set_meta)
-            la.session_save(self.sess_key, self.messages)
-        except Exception as e:
+        except (Exception, SystemExit) as e:
+            # SystemExit dari _http_json bukan turunan Exception -> harus disebut eksplisit
             w(f"[red]! error: {e}[/]")
         finally:
+            # SIMPAN DI finally: kalau agent_turn gagal (mis. API 503/timeout), pesan
+            # user + hasil sebagian tetap tersimpan. Dulu save di jalur sukses saja,
+            # sehingga turn yang error hilang.
+            self._autosave()
             self.busy = False; self.activity = "idle"; self._worker = None
             self.app.call_from_thread(self._refresh_bars)
             self.app.call_from_thread(lambda: self.query_one("#chatinput", ChatBox).focus())
