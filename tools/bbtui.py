@@ -869,6 +869,7 @@ SLASH_HELP = [
     ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
     ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=#/esc)"),
+    ("/redraw", "gambar ulang layar (bersihkan sisa render terminal; = esc)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
 
@@ -968,7 +969,7 @@ class ChatInput(Input):
         # status/kotak tergambar dobel. Bersihkan seleksi + paksa repaint penuh sekali.
         try: self.screen.clear_selection()
         except Exception: pass
-        try: self.app.call_after_refresh(self.app.refresh, repaint=True, layout=True)
+        try: self.app.call_after_refresh(self.app.action_redraw)   # gambar ulang PENUH
         except Exception: pass
 
 class LlmChatScreen(ModalScreen):
@@ -1053,6 +1054,12 @@ class LlmChatScreen(ModalScreen):
         self.query_one("#chatstatus", Static).update(self._statusline())
     def _tick(self):
         self._refresh_bars()
+        # SELF-HEAL: tiap ~4s gambar ulang penuh. Kalau terminal sempat desync (scroll/tearing),
+        # sampah render hilang sendiri dalam beberapa detik tanpa user menekan apa pun.
+        self._tk_full = getattr(self, "_tk_full", 0) + 1
+        if self._tk_full % 6 == 0:
+            try: self.app.action_redraw()
+            except Exception: pass
         try:
             wrap = self.query_one("#thinkwrap")
             lbl = self.query_one("#thinklbl", Static); bar = self.query_one("#thinkbar", Static)
@@ -1146,9 +1153,14 @@ class LlmChatScreen(ModalScreen):
         self.busy = False; self.activity = "idle"; self._refresh_bars()
         log.write("[yellow]# dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
     def action_soft_escape(self):
-        # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan cara keluar
-        if self.busy: self.action_stop()
-        else: self.query_one("#chatlog", SelectableLog).write("[dim]keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/]. (esc sengaja tidak menutup agar tak salah pencet)[/]")
+        # esc TIDAK langsung keluar. Sibuk -> stop. Tidak sibuk -> GAMBAR ULANG layar
+        # (esc = refleks user saat layar berantakan) + ingatkan cara keluar, tanpa spam.
+        if self.busy: self.action_stop(); return
+        self.app.action_redraw()
+        log = self.query_one("#chatlog", SelectableLog)
+        msg = ("[dim]esc: layar digambar ulang. Keluar sesi chat: [b]Ctrl+Q[/] atau ketik [b]/quit[/] "
+               "(esc sengaja tidak menutup agar tak salah pencet).[/]")
+        if not log._lines or log._lines[-1] != msg: log.write(msg)   # jangan tumpuk baris sama
     def action_quit_chat(self):
         if self.busy: self.action_stop()
         self._autosave()
@@ -1254,6 +1266,7 @@ class LlmChatScreen(ModalScreen):
             log.write("[magenta]~ meringkas konteks...[/]"); self._do_compact(p, mdl, base, k)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
+        elif cmd == "redraw": self.app.action_redraw()
         elif cmd in ("quit", "exit", "q", "keluar"):
             if self.busy: self.action_stop()
             log.write("[dim]keluar sesi chat...[/]"); self.app.pop_screen()
@@ -1469,7 +1482,7 @@ class BBTUI(App):
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
-                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("escape", "clear_search", "")]
+                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("ctrl+l", "redraw", "redraw"), ("escape", "clear_search", "")]
     def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, icon="*")
@@ -1574,6 +1587,21 @@ class BBTUI(App):
         cur = str(self.cfg.get("sort", "platform"))
         self.cfg["sort"] = order[(order.index(cur) + 1) % len(order)] if cur in order else "quiet"
         save_cfg(self.cfg); self.notify(f"urut: {self.cfg['sort']}"); self._render()
+    def action_redraw(self):
+        # Gambar ulang SELURUH layar (bukan diff). Textual normalnya hanya menulis sel yang
+        # BERUBAH; kalau terminal sempat ter-scroll/desync, sel basi tak pernah ditimpa ->
+        # sampah permanen (status bar dobel, teks lama nyangkut). _set_dirty() tanpa argumen
+        # menandai seluruh region layar sehingga compositor memakai render_full_update().
+        try:
+            scr = self.screen; comp = scr._compositor
+            # render_update() memilih render_full_update() bila SELURUH region layar ada di
+            # _dirty_regions milik COMPOSITOR (bukan milik widget Screen -> beda atribut).
+            comp._dirty_regions.add(comp.size.region)
+            scr._set_dirty()
+            scr.refresh()
+        except Exception:
+            try: self.refresh(repaint=True, layout=True)
+            except Exception: pass
     def action_copy_text(self):
         # salin teks yg dipilih (drag mouse) ke clipboard -- Ctrl+C (bawaan Textual: Screen.copy_text)
         try: self.screen.action_copy_text()
