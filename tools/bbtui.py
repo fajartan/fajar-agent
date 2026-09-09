@@ -925,7 +925,9 @@ def _md_line(raw):
         s = _re.sub(r"(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)", r"[i]\1[/]", s)
         s = _re.sub(r"`([^`]+)`", r"[cyan]\1[/]", s)
         # URL -> link clickable (Ctrl+Click buka browser di terminal yg dukung)
-        s = _re.sub(r"(https?://[^\s\]\)>'\"]+)", r"[link=\1][u cyan]\1[/u cyan][/link]", s)
+        # nilai link WAJIB dikutip: markup Textual menolak nilai tak berkutip yang
+        # memuat ':' dan '/' -> MarkupError, sehingga tiap jawaban ber-URL bikin crash.
+        s = _re.sub(r"(https?://[^\s\]\)>'\"]+)", r"[link='\1'][u cyan]\1[/u cyan][/link]", s)
         return s
     if hashes and st[hashes:hashes + 1] == " ":            # heading -> tebal polos (tenang), tanpa '#'
         return "[b]" + inline(escape(st[hashes:].strip())) + "[/]"
@@ -1075,7 +1077,7 @@ class LlmChatScreen(ModalScreen):
             up = int((now - self.sess_start).total_seconds())
             clock = f"  │  ⏱ sesi {up//60}m{up%60:02d}s"
         cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
-        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  giliran {self.turns}{cmp}  │  "
+        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  turn {self.turns}{cmp}  │  "
                 f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
     @work(thread=True)
     def _load_window(self):
@@ -1346,7 +1348,7 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "status":
             p, mdl, _b, k = _llm_creds(self.cfg)
             log.write(f"[b]status:[/] model={mdl} provider={p} key={'ada' if k else 'BELUM'} yolo={'ON' if self.allow_gated else 'off'} "
-                      f"giliran={self.turns} token_in/out={self.tok_in}/{self.tok_out} ctx={self.ctx}/{self.window} compactx{self.compacts} sibuk={self.busy}")
+                      f"turn={self.turns} token_in/out={self.tok_in}/{self.tok_out} ctx={self.ctx}/{self.window} compactx{self.compacts} sibuk={self.busy}")
         elif cmd == "context":
             win = self.window or _llm_mod().model_window(_llm_creds(self.cfg)[1])
             est = _llm_mod().estimate_ctx(self.messages) if self.messages else 0
@@ -1470,12 +1472,32 @@ class LlmChatScreen(ModalScreen):
     def _is_sep(l):
         s = l.strip().strip("|")
         return bool(s) and all(set(c.strip()) <= set("-:") and c.strip() for c in s.split("|"))
+    def _box_width(self):
+        """Lebar isi kotak chat. Dipakai utk panjang garis kurung."""
+        try:
+            w = self.query_one("#chatlog", SelectableLog).content_size.width
+        except Exception:
+            w = 0
+        return max(28, min(w or 78, 220))
+    def _write_box(self, label, inner, color):
+        """Gambar kotak berkurung sebagai TEKS.
+
+        Bukan Rich Panel: Panel/Group membuat Static tak bisa diseleksi, jadi seluruh
+        kotak dirakit sebagai satu markup string. Sisi kanan sengaja dibiarkan terbuka
+        supaya baris panjang yang membungkus tidak merusak bingkai.
+        """
+        from rich.cells import cell_len
+        W = self._box_width()
+        head = "╭─ %s " % label
+        dash = max(0, W - cell_len(head) - 1)
+        out = ["", "[%s]╭─[/] [b %s]%s[/] [%s]%s╮[/]" % (color, color, label, color, "─" * dash)]
+        for ln in inner:
+            out.append(("[%s]│[/] " % color) + ln if ln else "[%s]│[/]" % color)
+        out.append("[%s]╰%s╯[/]" % (color, "─" * max(0, W - 2)))
+        self.query_one("#chatlog", SelectableLog).write(chr(10).join(out))
     def _write_user(self, text):
         from rich.markup import escape
-        # kotak hijau via garis, satu markup string (biar bisa diseleksi)
-        body = "\n".join("[green]│[/] " + escape(l) for l in text.splitlines())
-        self.query_one("#chatlog", SelectableLog).write(
-            f"\n[b green]▶ kamu[/]\n{body or '[green]│[/]'}")
+        self._write_box("▶ kamu", [escape(l) for l in (text.splitlines() or [""])], "green")
     def _table_text(self, rows):
         from rich.markup import escape
         cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
@@ -1484,26 +1506,26 @@ class LlmChatScreen(ModalScreen):
         for row in data:
             for i, c in enumerate(row): w[i] = max(w[i], len(c))
         line = lambda cs: " │ ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
-        out = ["  [b]" + escape(line(hdr)) + "[/]",
-               "  [dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
-        out += ["  " + escape(line(r)) for r in data]
+        out = ["[b]" + escape(line(hdr)) + "[/]",
+               "[dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
+        out += [escape(line(r)) for r in data]
         return "\n".join(out)
     def _write_agent(self, body):
         self._last_agent = body
-        out = ["\n[b cyan]🤖 agent[/]"]
+        inner = []
         lines = body.splitlines(); n = len(lines); i = 0
         while i < n:
             if self._is_row(lines[i]) and i + 1 < n and self._is_sep(lines[i + 1]):
                 j = i + 2
                 while j < n and self._is_row(lines[j]) and not self._is_sep(lines[j]): j += 1
-                out.append(self._table_text([lines[i]] + lines[i + 2:j])); i = j
+                inner.extend(self._table_text([lines[i]] + lines[i + 2:j]).split(chr(10))); i = j
             else:
                 ln = lines[i]
-                if not ln.strip(): out.append("")
-                elif "CHECKPOINT" in ln: out.append("  [black on cyan] " + ln.strip().lstrip("#").strip() + " [/]")
-                else: out.append("  " + _md_line(ln))
+                if not ln.strip(): inner.append("")
+                elif "CHECKPOINT" in ln: inner.append("[black on cyan] " + ln.strip().lstrip("#").strip() + " [/]")
+                else: inner.append(_md_line(ln))
                 i += 1
-        self.query_one("#chatlog", SelectableLog).write("\n".join(out))
+        self._write_box("🤖 agent", inner, "cyan")
     def _send(self, text):
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: self.app.notify("set API key dulu (Settings s)"); return
