@@ -863,22 +863,39 @@ TOOL_GROUPS = [
 ]
 
 SLASH_HELP = [
-    ("/help", "tampilkan daftar perintah"), ("/yolo", "toggle auto-approve aksi aktif (kirim traffic)"),
-    ("/model [nama]", "ganti model (kosong = pilih dari daftar provider)"), ("/provider <anthropic|openai>", "ganti provider"),
-    ("/new", "sesi baru (reset percakapan; memori tetap)"), ("/clear", "bersihkan layar chat"),
-    ("/resume", "pilih riwayat chat dari pop-up lalu lanjutkan"), ("/save", "simpan sesi sekarang"),
-    ("/memory [cari]", "lihat/cari memori jangka panjang"), ("/skills", "daftar skill/playbook"),
-    ("/skill install <nama> <url|path>", "pasang skill baru (playbook)"),
-    ("/tools", "daftar tool yg dimiliki agent"), ("/stage", "ingatkan agent lanjut/lapor tahap"),
-    ("/add <path>", "upload/ingest file atau folder projek ke konteks (drag path juga bisa)"),
-    ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
-    ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
-    ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=#/esc)"),
-    ("/redraw", "gambar ulang layar (bersihkan sisa render terminal; = esc)"),
-    ("/mouse", "lepas/ambil mouse dari terminal (darurat kalau seleksi mouse bermasalah)"),
-    ("/diag", "SIMPAN laporan diagnosa + screenshot ke ~/ (utk lapor bug render)"),
-    ("/export", "SIMPAN percakapan ke .md (salin dari file, tanpa seleksi di TUI)"),
-    ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
+    # -- hunting (menutup celah: dulu recon/dedup/monitor hanya ada di dashboard) --
+    ("/target", "lihat target aktif + scope resmi yang dimuat ke konteks"),
+    ("/recon [domain]", "jalankan recon (default: apex target aktif)"),
+    ("/monitor [domain]", "pantau subdomain baru"),
+    ("/dedup [handle]", "kelas bug yang SUDAH dilaporkan di program"),
+    ("/stage", "suruh agent lanjut ke tahap berikutnya"),
+    ("/retry", "kirim ulang pesan terakhir (kalau API error/timeout)"),
+    # -- sesi & konteks --
+    ("/resume", "pilih riwayat chat dari pop-up lalu lanjutkan"),
+    ("/new", "sesi baru (reset percakapan; memori tetap)"),
+    ("/save", "simpan sesi sekarang (biasanya tak perlu: sudah autosave)"),
+    ("/export", "simpan percakapan ke file .md"),
+    ("/clear", "bersihkan LAYAR saja (riwayat sesi tetap)"),
+    ("/context", "pemakaian konteks (token/window)"),
+    ("/compact", "ringkas konteks sekarang (hemat token)"),
+    ("/add <path>", "masukkan file/folder ke konteks (drag path juga bisa)"),
+    # -- agent & model --
+    ("/yolo", "izinkan aksi aktif (kirim traffic) -- hati-hati"),
+    ("/model [nama]", "ganti model (kosong = pilih dari daftar)"),
+    ("/provider <anthropic|openai>", "ganti provider"),
+    ("/memory [cari]", "lihat/cari memori jangka panjang"),
+    ("/skills", "daftar skill/playbook"),
+    ("/skill install <nama> <url|path>", "pasang skill baru"),
+    ("/tools", "daftar tool yang dimiliki agent"),
+    ("/mcp [connect]", "status / connect server MCP"),
+    ("/status", "ringkasan kondisi agent"),
+    ("/stop", "HENTIKAN proses agent yang sedang jalan (= esc)"),
+    ("/help", "daftar perintah & tombol"),
+    ("/quit", "keluar sesi chat (esc sengaja TIDAK menutup)"),
+    # -- darurat/diagnosa --
+    ("/redraw", "gambar ulang layar (bersihkan sisa render terminal)"),
+    ("/mouse", "lepas/ambil mouse dari terminal"),
+    ("/diag", "simpan laporan diagnosa + screenshot ke ~/"),
 ]
 
 def classify_assets(scope):
@@ -892,6 +909,11 @@ def classify_assets(scope):
         elif "." in sl and " " not in sl: web.append(s)
         else: other.append(s)
     return {"web": web, "api": api, "android": android, "ios": ios, "other": other}
+
+def escape_markup(t):
+    """Amankan teks bebas sebelum dipakai di markup (kurung siku ditafsirkan sbg tag)."""
+    from rich.markup import escape
+    return escape(str(t))
 
 def program_context(pr):
     """SKEMA EKSTRAKSI: ubah 1 program -> brief terstruktur utk LLM (sumber scope resmi + rute skill)."""
@@ -1317,9 +1339,14 @@ class LlmChatScreen(ModalScreen):
         if cmd in ("help", "?", "h"):
             # PERINTAH dulu, ringkasan TOMBOL/ALUR di AKHIR: log auto-scroll ke bawah,
             # jadi bagian paling sering dibutuhkan yang tersisa di layar.
+            from rich.cells import cell_len as _cl
+            wmax = max(_cl(c) for c, _ in SLASH_HELP)
             log.write("[b cyan]PERINTAH[/]")
             for c, d in SLASH_HELP:
-                log.write(f"  [yellow]{c}[/] [dim]{d}[/]")
+                pad = " " * (wmax - _cl(c) + 2)      # rata kolom biar mudah dibaca
+                # WAJIB escape: placeholder seperti [domain]/[cari] ditafsirkan Rich
+                # sebagai tag markup lalu DIBUANG, jadi placeholder tak pernah tampil.
+                log.write(f"  [yellow]{escape_markup(c)}[/]{pad}[dim]{escape_markup(d)}[/]")
             _n = chr(10)
             log.write(
                 _n + "[b cyan]TOMBOL[/]" + _n +
@@ -1396,6 +1423,39 @@ class LlmChatScreen(ModalScreen):
             if not self.messages or len(self.messages) < 3: log.write("[yellow]konteks masih pendek.[/]"); return
             p, mdl, base, k = _llm_creds(self.cfg)
             log.write("[magenta]~ meringkas konteks...[/]"); self._do_compact(p, mdl, base, k)
+        elif cmd == "target":
+            if not self.target:
+                log.write("[yellow]tak ada target aktif.[/] [dim]Pilih program di layar utama lalu tekan[/] [b]l[/].")
+            else:
+                log.write("[b green]🎯 target aktif:[/] " + str(self.target.get("name")))
+                log.write("[dim]" + escape_markup(program_context(self.target)) + "[/]")
+        elif cmd in ("recon", "monitor", "dedup"):
+            d = arg or (apex(self.target) if self.target else "")
+            if cmd == "dedup" and not arg and self.target:
+                d = self.target.get("key") or self.target.get("name") or ""
+            if not d:
+                log.write(f"[yellow]pakai: /{cmd} <target>[/] [dim](tak ada target aktif utk default)[/]")
+            else:
+                log.write(f"[cyan]membuka {cmd}[/] [dim]{d} -- esc utk batal[/]")
+                self.app.push_screen(ToolScreen(cmd, d))
+        elif cmd == "retry":
+            last = None
+            for m in reversed(self.messages or []):
+                if m.get("role") != "user": continue
+                t = _llm_mod()._msg_text(m.get("content"))
+                if t.startswith("[TARGET CONTEXT]") or t.startswith("[ARTEFAK"): continue
+                last = t; break
+            if not last:
+                log.write("[yellow]belum ada pesan untuk dikirim ulang.[/]")
+            elif self.busy:
+                log.write("[yellow]agent masih sibuk -- tekan esc dulu.[/]")
+            else:
+                # buang pesan user terakhir supaya tidak dobel di konteks
+                for k in range(len(self.messages) - 1, -1, -1):
+                    if self.messages[k].get("role") == "user":
+                        del self.messages[k]; break
+                log.write(f"[cyan]kirim ulang:[/] [dim]{escape_markup(last[:80])}[/]")
+                self._submit(last)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
         elif cmd == "redraw":
@@ -1455,7 +1515,9 @@ class LlmChatScreen(ModalScreen):
                 if q in cmd[1:].lower(): name_hits.append((c, d, cmd))   # match NAMA command dulu
                 elif q in d.lower(): desc_hits.append((c, d, cmd))       # baru deskripsi
             for c, d, cmd in name_hits + desc_hits:
-                box.add_option(Option(f"{c}  --  {d}", id=cmd))
+                # escape: placeholder [domain]/[cari] dst kalau tidak di-escape akan
+                # dianggap tag markup oleh OptionList lalu hilang dari daftar.
+                box.add_option(Option(f"{escape_markup(c)}  --  {escape_markup(d)}", id=cmd))
             if box.option_count:
                 box.add_class("on"); box.highlighted = 0
             else:
