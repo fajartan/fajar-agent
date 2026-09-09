@@ -15,6 +15,7 @@ try:
     from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar
     from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
+    from textual.binding import Binding
     from textual import work
 except ImportError:
     sys.exit("[!] butuh 'textual'. Pasang:  pip install --user --break-system-packages textual\n"
@@ -491,7 +492,7 @@ ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
-#chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; }
+#chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; layers: base pop; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
 #chatscroll { height: 1fr; background: $surface; }
 #chatlog { height: auto; padding: 0 1; }
@@ -504,7 +505,7 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
 #chatbar { dock: bottom; height: 3; }
 #chatinput { width: 1fr; border: tall $accent; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
-#slashbox { dock: bottom; height: auto; max-height: 12; margin: 0 0 3 0; border: round $accent; background: $panel; display: none; }
+#slashbox { layer: pop; dock: bottom; offset: 0 -3; width: 100%; height: auto; max-height: 12; border: round $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
 
@@ -1432,7 +1433,7 @@ class BBTUI(App):
     CSS = CSS
     ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy — tanpa Shift/slash
     TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
-    BINDINGS = [("ctrl+shift+c", "copy_text", "salin"), ("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
+    BINDINGS = [Binding("ctrl+shift+c", "copy_text", "salin", key_display="Ctrl+Shift+C"), ("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
