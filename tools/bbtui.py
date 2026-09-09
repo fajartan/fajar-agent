@@ -872,6 +872,7 @@ SLASH_HELP = [
     ("/retry", "kirim ulang pesan terakhir (kalau API error/timeout)"),
     ("/note <teks>", "catat temuan cepat ke workspace target (tanpa lewat agent)"),
     ("/report [save]", "susun draf laporan; 'save' menyimpan jawaban agent terakhir"),
+    ("/handoff [domain]", "buat HANDOFF PACK: recon -> target Burp + endpoint prioritas"),
     ("/ext", "kelola & jalankan ext-tools (nuclei/sqlmap/burp/dll)"),
     # -- sesi & konteks --
     ("/resume", "pilih riwayat chat dari pop-up lalu lanjutkan"),
@@ -1482,6 +1483,15 @@ class LlmChatScreen(ModalScreen):
                              "1-variabel, bukti, saran perbaikan), dan cek anti-duplikat. "
                              "JANGAN submit ke platform -- berhenti di CHECKPOINT supaya saya review. "
                              "Setelah itu saya simpan dengan /report save.")
+        elif cmd == "handoff":
+            d = arg or (apex(self.target) if self.target else "")
+            if not d:
+                log.write("[yellow]pakai: /handoff <domain>[/] [dim](atau pilih target dulu)[/]")
+            else:
+                log.write(f"[cyan]menyusun handoff pack[/] [dim]{d}...[/]")
+                r = _llm_mod().t_handoff(d)
+                log.write("[green]" + escape_markup(r) + "[/]" if "PACK dibuat" in r
+                          else "[yellow]" + escape_markup(r) + "[/]")
         elif cmd in ("ext", "ext-tools", "exttools"):
             d = arg or (apex(self.target) if self.target else "")
             log.write("[cyan]membuka ext-tools[/] [dim]" + (d or "tanpa target") + " -- esc utk batal[/]")

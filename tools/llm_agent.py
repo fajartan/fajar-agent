@@ -383,6 +383,151 @@ def t_read_recon(domain=""):
             return f"[recon {domain}] dir={rec}\nfile: {', '.join(sorted(files))}\n\n--- summary.md ---\n{body[:6000]}"
     return f"[belum ada hasil recon utk {domain}] jalankan recon dulu (profile passive/standard)."
 
+def _recon_dir(domain):
+    for base in (os.path.expanduser("~/bb-recon"), os.path.expanduser("~/bb-workspaces")):
+        rec = os.path.join(base, domain, "recon")
+        if os.path.isdir(rec):
+            return rec
+    return None
+
+# skor "menarik" utk endpoint: makin tinggi -> makin layak diuji manual duluan
+_HANDOFF_SIGNALS = [
+    (9, ("admin", "/internal", "debug", "actuator", "/.git", "swagger", "graphql")),
+    (8, ("upload", "import", "export", "/api/", "/v1/", "/v2/", "/v3/", "rest/")),
+    (7, ("token", "auth", "login", "oauth", "sso", "saml", "password", "reset",
+         "session", "jwt", "apikey", "api_key", "secret")),
+    (6, ("account", "/user", "/users/", "profile", "invoice", "order", "payment", "billing")),
+    (6, ("redirect", "return", "callback", "next=", "url=", "continue=", "dest=")),
+    (5, ("id=", "uid=", "user_id", "account_id", "/id/", "uuid", "file=", "path=", "doc=")),
+    (4, ("config", "setting", "webhook", "integration", "/proxy", "fetch=", "feed=")),
+]
+
+def _score_url(u):
+    ul = u.lower(); sc = 0; tags = []
+    for weight, kws in _HANDOFF_SIGNALS:
+        for kw in kws:
+            if kw in ul:
+                sc += weight
+                tags.append(kw.strip("/=")); break
+    return sc, tags
+
+def t_handoff(domain=""):
+    """HANDOFF PACK: ubah hasil recon jadi paket siap uji-manual (Burp/Caido).
+
+    Menghasilkan (di folder recon domain): burp-targets.txt (host live siap import),
+    handoff.md (endpoint terprioritas + secret JS + temuan nuclei). Fase manual —
+    yang tak bisa diotomasi — jadi mulai dari garis depan, bukan dari nol.
+    """
+    NL = chr(10)
+    if not domain:
+        return "[gagal] domain kosong."
+    rec = _recon_dir(domain)
+    if not rec:
+        return f"[belum ada hasil recon utk {domain}] jalankan recon dulu (profile standard)."
+
+    def rd(name):
+        fp = os.path.join(rec, name)
+        if not os.path.exists(fp):
+            return []
+        try:
+            return [l.rstrip("\n") for l in open(fp, encoding="utf-8", errors="replace") if l.strip()]
+        except Exception:
+            return []
+
+    # host live (httpx: token pertama = URL)
+    live = []
+    for l in rd("live.txt"):
+        u = l.split()[0].strip()
+        if u.startswith("http"):
+            live.append(u)
+    live = sorted(set(live))
+
+    # kumpulan URL (crawl + arsip) utk diprioritaskan
+    urls = set()
+    for f in ("urls.txt", "content.txt"):
+        for l in rd(f):
+            u = l.split()[0].strip()
+            if u.startswith("http"):
+                urls.add(u)
+    # gf sudah menandai param mencurigakan -> sinyal kuat, beri bobot ekstra
+    gf_hits = {}
+    for kind in ("idor", "ssrf", "sqli", "xss", "redirect", "lfi", "ssti", "rce"):
+        hits = rd(f"gf_{kind}.txt")
+        for l in hits:
+            u = l.split()[0].strip()
+            if u.startswith("http"):
+                urls.add(u); gf_hits.setdefault(u, []).append(kind)
+
+    scored = []
+    for u in urls:
+        sc, tags = _score_url(u)
+        if u in gf_hits:
+            sc += 6 * len(gf_hits[u]); tags = sorted(set(tags + ["gf:" + ",".join(gf_hits[u])]))
+        if sc > 0:
+            scored.append((sc, u, tags))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+
+    secrets = rd("jsleak.txt") + rd("mantra.txt")
+    nuclei = rd("nuclei.txt")
+
+    # tulis burp-targets.txt (satu URL per baris, siap import Target > Scope / paste)
+    bt = os.path.join(rec, "burp-targets.txt")
+    open(bt, "w", encoding="utf-8").write(NL.join(live) + NL)
+
+    L = []
+    L.append(f"# HANDOFF PACK — {domain}")
+    L.append(f"_sumber: {rec}_" + NL)
+    L.append(f"- host live: {len(live)}  ·  endpoint terskor: {len(scored)}  ·  "
+             f"secret JS: {len(secrets)}  ·  nuclei: {len(nuclei)}")
+    L.append(f"- import ke Burp/Caido: `{bt}`" + NL)
+
+    L.append("## 1. Target siap-import (host live)")
+    L.append("```")
+    L += live[:80]
+    if len(live) > 80:
+        L.append(f"... +{len(live)-80} lagi (lihat burp-targets.txt)")
+    L.append("```" + NL)
+
+    L.append("## 2. Endpoint prioritas (uji manual duluan)")
+    if scored:
+        L.append("_skor = sinyal auth/admin/api/idor/redirect + tanda gf. Makin atas makin layak._" + NL)
+        for sc, u, tags in scored[:60]:
+            L.append(f"- **[{sc}]** {u}  _({', '.join(tags[:5])})_")
+        if len(scored) > 60:
+            L.append(f"- ... +{len(scored)-60} endpoint lagi")
+    else:
+        L.append("_(tak ada URL/param terkumpul — jalankan recon profile standard dulu)_")
+    L.append("")
+
+    if secrets:
+        L.append("## 3. Secret / kebocoran di JS")
+        L.append("```")
+        L += secrets[:40]
+        if len(secrets) > 40:
+            L.append(f"... +{len(secrets)-40} lagi")
+        L.append("```" + NL)
+
+    if nuclei:
+        L.append("## 4. Temuan nuclei (verifikasi manual — jangan auto-percaya)")
+        L.append("```")
+        L += nuclei[:40]
+        if len(nuclei) > 40:
+            L.append(f"... +{len(nuclei)-40} lagi")
+        L.append("```" + NL)
+
+    L.append("## Langkah manual berikutnya")
+    L.append("1. Import `burp-targets.txt` ke Burp/Caido Target scope.")
+    L.append("2. Mulai dari endpoint skor tertinggi — proxy request, ubah 1 variabel.")
+    L.append("3. Param bertanda `gf:idor/ssrf/...` = kandidat kuat, uji authz lintas akun.")
+    L.append("4. Cek tiap secret JS: masih valid? akses apa?")
+    L.append("5. Catat temuan dgn /note, dedup dulu sebelum draf (/report).")
+
+    out = os.path.join(rec, "handoff.md")
+    report = NL.join(L)
+    open(out, "w", encoding="utf-8").write(report)
+    return (f"HANDOFF PACK dibuat:{NL}  {out}{NL}  {bt}{NL}"
+            f"live={len(live)} endpoint-prioritas={len(scored)} secret={len(secrets)} nuclei={len(nuclei)}")
+
 def t_save_note(program="", text="", kind="hypotheses"):
     if not program or not text: return "[gagal] program/text kosong."
     import re as _re
@@ -529,6 +674,9 @@ TOOLS = [
      "schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
     {"name": "read_recon", "gated": False, "fn": t_read_recon,
      "desc": "Baca hasil recon (summary.md + daftar file) sebuah domain untuk dianalisa jadi hipotesis.",
+     "schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
+    {"name": "handoff", "gated": False, "fn": t_handoff,
+     "desc": "Ubah hasil recon jadi HANDOFF PACK siap uji-manual: burp-targets.txt (host live) + handoff.md (endpoint terprioritas berdasar sinyal auth/api/idor/redirect + secret JS + temuan nuclei).",
      "schema": {"type": "object", "properties": {"domain": {"type": "string"}}, "required": ["domain"]}},
     {"name": "read_file", "gated": False, "fn": t_read_file,
      "desc": "Baca 1 file teks lokal (JS/JSON/source/Burp/HAR export) yg di-upload/drag user untuk dianalisa.",
