@@ -1474,6 +1474,25 @@ class SchedulerScreen(ModalScreen):
     def action_remove(self):
         cron_remove(); self.query_one("#cronstat", Static).update(self._status()); self.app.notify("jadwal dihapus")
 
+def _clip_write(text):
+    """Tulis ke clipboard OS lewat tool asli (TANPA escape terminal).
+
+    Kembalikan nama tool bila sukses, None bila tak ada tool. Ini dipakai menggantikan
+    OSC52 bawaan Textual: OSC52 menulis '\\x1b]52;c;<base64>' LANGSUNG ke terminal di luar
+    pipeline render — blob besar bisa terjalin dgn frame & merusak sequence posisi kursor,
+    sehingga baris tergambar di koordinat salah (sampah/glitch).
+    """
+    for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"],
+                ["xsel", "--clipboard", "--input"], ["pbcopy"]):
+        if not shutil.which(cmd[0]): continue
+        try:
+            p = subprocess.run(cmd, input=text.encode("utf-8"),
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+            if p.returncode == 0: return cmd[0]
+        except Exception:
+            pass
+    return None
+
 class BBTUI(App):
     CSS = CSS
     ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy -- tanpa Shift/slash
@@ -1602,12 +1621,40 @@ class BBTUI(App):
         except Exception:
             try: self.refresh(repaint=True, layout=True)
             except Exception: pass
-    def action_copy_text(self):
-        # salin teks yg dipilih (drag mouse) ke clipboard -- Ctrl+C (bawaan Textual: Screen.copy_text)
-        try: self.screen.action_copy_text()
-        except Exception:
-            try: self.copy_to_clipboard(self.screen.get_selected_text() or "")
+    def copy_to_clipboard(self, text: str) -> None:
+        """Override: pakai clipboard OS, JANGAN OSC52 raksasa.
+
+        Bawaan Textual menulis '\\x1b]52;c;<base64>' langsung ke terminal. Untuk blok chat
+        besar, blob itu terjalin dgn frame -> sequence posisi kursor rusak -> baris tergambar
+        di koordinat salah (inilah glitch 'copy lalu paste'). Pakai wl-copy/xclip/xsel/pbcopy.
+        """
+        self._clipboard = text
+        if not text: return
+        if _clip_write(text):                      # jalur AMAN: nol escape ke terminal
+            try: self.call_after_refresh(self.action_redraw)
             except Exception: pass
+            return
+        if len(text) > 1000:                       # blob OSC52 besar = perusak layar
+            self.notify("teks terlalu panjang untuk clipboard terminal (butuh tool OS). "
+                        "Pasang: sudo apt install xclip   # atau wl-clipboard di Wayland",
+                        severity="warning", timeout=10)
+            return
+        def _osc():
+            # ditunda: ditulis SETELAH frame selesai supaya tak terjalin dgn sequence
+            # posisi kursor, lalu layar digambar ulang penuh utk memastikan bersih.
+            try: App.copy_to_clipboard(self, text)
+            except Exception: pass
+            self.action_redraw()
+        try: self.call_after_refresh(_osc)
+        except Exception: pass
+    def action_copy_text(self):
+        # salin teks yg dipilih (drag mouse) -- Ctrl+C. Lewat copy_to_clipboard() di atas.
+        try: text = self.screen.get_selected_text() or ""
+        except Exception: text = ""
+        if not text:
+            self.notify("belum ada teks dipilih -- sorot dulu dengan mouse"); return
+        self.copy_to_clipboard(text)
+        self.notify(f"tersalin {len(text)} karakter")
     def action_help(self): self.push_screen(HelpScreen())
     def action_external(self):
         pr = self._selected(); self.push_screen(ExternalToolsScreen(self.cfg, apex(pr) if pr else ""))
