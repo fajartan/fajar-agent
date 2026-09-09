@@ -12,7 +12,8 @@ import json, os, re, sys, base64, shlex, shutil, datetime, subprocess, urllib.re
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll, Center, Middle
-    from textual.widgets import Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar
+    from textual.widgets import (Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar, TextArea)
+    from textual.message import Message
     from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
     from textual.binding import Binding
@@ -501,10 +502,11 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: ascii $
 #thinkwrap.on { display: block; }
 #thinklbl { width: auto; color: $accent; }
 #thinkbar { width: auto; color: $accent; padding: 0 0 0 1; }
-#chatbar { dock: bottom; height: 3; }
-#chatinput { width: 1fr; border: ascii $accent; }
+#chatbar { dock: bottom; height: 5; align-vertical: middle; }
+#chatinput { width: 1fr; height: 5; border: ascii $accent; scrollbar-size: 0 0; }
+#chatinput:focus { border: ascii $success; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
-#slashbox { layer: pop; dock: bottom; offset: 0 -3; width: 100%; height: auto; max-height: 12; border: ascii $accent; background: $panel; display: none; }
+#slashbox { layer: pop; dock: bottom; offset: 0 -5; width: 100%; height: auto; max-height: 12; border: ascii $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
 
@@ -955,31 +957,69 @@ class SelectableLog(Static):
     def clear(self):
         self._lines = []; self.update("")
 
-class ChatInput(Input):
-    """Input chat 1-baris: paste multi-baris DIGABUNG jadi satu baris (semua teks disimpan,
-    tak ada submit beruntun/freeze, tak buang baris ke-2 dst seperti Input bawaan)."""
+class ChatBox(TextArea):
+    """Kotak chat MULTI-BARIS, tinggi TETAP (rigid), gulir internal.
+
+    Kenapa bukan Input satu-baris: Input merender SELURUH isi sebagai SATU baris.
+    Baris itu gampang pas/melebihi lebar terminal -- selisih SATU sel saja (karakter
+    lebar, atau font yang menggambar emoji 1 sel padahal dihitung 2) membuat terminal
+    MEMBUNGKUS baris itu, sehingga teks 'menjorok ke bawah' dan seluruh layout
+    tergeser (inilah glitch-nya). Di sini teks dibungkus DI DALAM kotak (soft_wrap)
+    dan di-clip Textual, jadi tidak pernah ada satu baris raksasa.
+
+    Enter = kirim.  Alt+Enter / Ctrl+J / Shift+Enter = baris baru.
+    """
+    class Submitted(Message):
+        def __init__(self, value):
+            super().__init__(); self.value = value
+
+    def __init__(self, *a, **k):
+        k.setdefault("soft_wrap", True)          # WAJIB: bungkus di dalam kotak
+        k.setdefault("tab_behavior", "focus")    # Tab pindah fokus, bukan indent
+        super().__init__(*a, **k)
+
+    # -- kompatibel dgn kode yang memakai .value seperti Input --
+    @property
+    def value(self):
+        return self.text
+    @value.setter
+    def value(self, v):
+        self.text = v or ""
+        try: self.move_cursor(self.document.end)
+        except Exception: pass
+
+    def _on_key(self, event):
+        # prevent_default() memutus loop dispatch MRO supaya TextArea._on_key
+        # bawaan tidak ikut jalan utk tombol yang kita tangani sendiri.
+        if event.key == "enter":
+            event.stop(); event.prevent_default()
+            self.post_message(self.Submitted(self.text))
+        elif event.key in ("shift+enter", "alt+enter", "ctrl+j"):
+            event.stop(); event.prevent_default()
+            self.insert(chr(10))
+        # tombol lain dibiarkan -> TextArea._on_key jalan sendiri lewat MRO
+
     def _on_paste(self, event):
-        # prevent_default() WAJIB: dispatch Textual memanggil _on_paste utk tiap kelas di MRO,
-        # jadi tanpa ini Input._on_paste base ikut jalan & menyisipkan baris-1 lagi (teks dobel).
         event.stop(); event.prevent_default()
-        if event.text:
-            clean = " ".join(s.strip() for s in event.text.splitlines() if s.strip())
-            sel = self.selection
-            if sel.is_empty: self.insert_text_at_cursor(clean)
-            else: self.replace(clean, *sel)
-        # GHOST-FIX: highlight seleksi chat (yg dibuat utk copy) sering nyangkut saat paste ->
-        # status/kotak tergambar dobel. Bersihkan seleksi + paksa repaint penuh sekali.
+        txt = event.text or ""
+        if txt:
+            # normalkan akhir baris; NEWLINE DIPERTAHANKAN (kotak ini multi-baris).
+            txt = txt.replace(chr(13) + chr(10), chr(10)).replace(chr(13), chr(10))
+            # buang karakter kontrol (bisa mendesync kursor terminal), sisakan \n dan tab
+            txt = "".join(c for c in txt if c in (chr(10), chr(9)) or ord(c) >= 32)
+            self.insert(txt)
         try: self.screen.clear_selection()
         except Exception: pass
-        try: self.app.call_after_refresh(self.app.action_redraw)   # gambar ulang PENUH
+        try: self.app.call_after_refresh(self.app.action_redraw)
         except Exception: pass
 
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code -- status bar, slash-commands, alur BERTAHAP rapi."""
     BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
                 ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear"),
-                ("pageup", "log_up", "gulir naik"), ("pagedown", "log_down", "gulir turun"),
-                ("ctrl+home", "log_home", "atas"), ("ctrl+end", "log_end", "bawah")]
+                ("ctrl+pageup", "log_up", "gulir naik"), ("ctrl+pagedown", "log_down", "gulir turun"),
+                ("ctrl+home", "log_home", "atas"), ("ctrl+end", "log_end", "bawah"),
+                ("f3", "toggle_active", "yolo")]
     def __init__(self, cfg, target=None):
         super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
@@ -1006,7 +1046,7 @@ class LlmChatScreen(ModalScreen):
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
                 yield Button("#", id="btnstop", variant="error")
-                yield ChatInput(placeholder=("ketik goal atau /  (daftar perintah)  -  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+                yield ChatBox(placeholder=("ketik goal atau /  --  Enter kirim, Alt+Enter baris baru" if key else "set API key dulu (Settings s)"), id="chatinput")
                 yield Button("> Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
@@ -1118,7 +1158,7 @@ class LlmChatScreen(ModalScreen):
             log.write("[cyan]* Tip:[/] tiap tahap berhenti di CHECKPOINT -- ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
             if not key: log.write("\n[red]! belum ada API key.[/] Settings (s) -> blok LLM AGENT, atau `bb.py llm --setup`.")
             # --- TARGET terpilih: suntik konteks scope resmi (skema ekstraksi) ---
-            inp = self.query_one("#chatinput", Input)
+            inp = self.query_one("#chatinput", ChatBox)
             if self.target and key:
                 ctx = program_context(self.target)
                 self.messages = la.new_messages(prov == "anthropic")
@@ -1131,10 +1171,11 @@ class LlmChatScreen(ModalScreen):
                 prev = la.session_load(self.sess_key)
                 if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) -- ketik [b]/resume[/] untuk lanjutkan.[/]")
                 log.write("\n[b yellow]= AGENT BELUM JALAN -- menunggu perintahmu.[/]")
-                log.write("[dim]Tekan Enter/Kirim untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
+                log.write("[dim]Tekan Enter (kotak kosong) untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
                 log.write(f"[dim]  saran: \"mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
                 self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
-            log.write("\n[dim]> Kirim/Enter=mulai - #/esc=stop - Ctrl+Q atau /quit=keluar - q di layar utama=tutup[/]")
+            log.write("\n[dim]> [b]Enter[/]=kirim - [b]Alt+Enter[/] (atau Ctrl+J)=baris baru - #/esc=stop - Ctrl+Q atau /quit=keluar[/]")
+            log.write("[dim]Kotak chat MULTI-BARIS & tinggi tetap: teks panjang membungkus di dalam kotak lalu digulir sendiri - layout tak bergerak. Gulir chat: Ctrl+PgUp / Ctrl+PgDn.[/]")
             log.write("[b yellow]📋 CARA SALIN yang pasti jalan:[/] tekan [b]F2[/] (MODE SALIN) -> sorot teks dengan mouse seperti teks biasa -> [b]Ctrl+Shift+C[/] -> [b]F2[/] lagi. Tempel: [b]Ctrl+Shift+V[/].")
             log.write("[dim]Di MODE SALIN, terminal yang menyeleksi (app melepas mouse) - bebas glitch. Gulir: PgUp/PgDn. Atau [b]/export[/] utk simpan percakapan ke file lalu salin dari sana.[/]")
         if self.cfg.get("mcp_servers"):
@@ -1143,7 +1184,7 @@ class LlmChatScreen(ModalScreen):
     # ---- actions ----
     def on_button_pressed(self, ev):
         if ev.button.id == "btnsend":
-            inp = self.query_one("#chatinput", Input); v = inp.value.strip(); inp.value = ""
+            inp = self.query_one("#chatinput", ChatBox); v = inp.value.strip(); inp.value = ""
             if not v and self._suggest: v = self._suggest
             if v: self._submit(v)
         elif ev.button.id == "btnstop":
@@ -1355,10 +1396,15 @@ class LlmChatScreen(ModalScreen):
         try: return self.query_one("#slashbox", OptionList)
         except Exception: return None
     def on_input_changed(self, ev):
-        if ev.input.id != "chatinput": return
+        if getattr(ev.input, "id", None) != "chatinput": return
+        self._slash_filter(ev.value)
+    def on_text_area_changed(self, ev):
+        if getattr(ev.text_area, "id", None) != "chatinput": return
+        self._slash_filter(ev.text_area.text)
+    def _slash_filter(self, v):
         box = self._slash_box()
         if box is None: return
-        v = ev.value
+        v = v or ""
         if v.startswith("/"):
             q = v[1:].split()[0].lower() if len(v) > 1 else ""
             box.clear_options()
@@ -1380,7 +1426,7 @@ class LlmChatScreen(ModalScreen):
         if not box or not box.has_class("on") or box.highlighted is None: return False
         opt = box.get_option_at_index(box.highlighted); cmd = opt.id or opt.prompt.split()[0]
         box.remove_class("on")
-        inp = self.query_one("#chatinput", Input)
+        inp = self.query_one("#chatinput", ChatBox)
         if run: inp.value = ""; self._submit(cmd)
         else: inp.value = cmd + " "; inp.focus()
         return True
@@ -1393,17 +1439,24 @@ class LlmChatScreen(ModalScreen):
         elif ev.key == "escape": box.remove_class("on"); ev.stop(); ev.prevent_default()
     def on_option_list_option_selected(self, ev):   # klik mouse pada opsi
         if ev.option_list.id == "slashbox": self._fill_slash(run=True)
+    def on_chat_box_submitted(self, ev):
+        self._do_submit(ev.value)
     def on_input_submitted(self, ev):
+        self._do_submit(ev.value)
+    def _do_submit(self, raw):
         box = self._slash_box()
         if box and box.has_class("on"):   # palette aktif
-            val = ev.value.strip(); tok = val.split()[0].lower() if val else ""
+            val = (raw or "").strip(); tok = val.split()[0].lower() if val else ""
             known = {c.split()[0] for c, _d in SLASH_HELP}
             if tok in known:                       # yg diketik PERSIS sebuah command -> jalankan itu (+ argnya)
-                ev.input.value = ""; box.remove_class("on"); self._slash(val); return
-            self._fill_slash(run=True); return     # cuma prefix -> jalankan yg ter-highlight (arrow utk pilih)
-        text = ev.value.strip(); ev.input.value = ""
+                self._clear_box(); box.remove_class("on"); self._slash(val); return
+            self._fill_slash(run=True); return     # cuma prefix -> jalankan yg ter-highlight
+        text = (raw or "").strip(); self._clear_box()
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
+    def _clear_box(self):
+        try: self.query_one("#chatinput", ChatBox).value = ""
+        except Exception: pass
     def _submit(self, text):
         log = self.query_one("#chatlog", SelectableLog)
         if text.startswith("/"): self._slash(text); return          # slash SELALU jalan (walau sibuk)
@@ -1507,7 +1560,7 @@ class LlmChatScreen(ModalScreen):
         finally:
             self.busy = False; self.activity = "idle"; self._worker = None
             self.app.call_from_thread(self._refresh_bars)
-            self.app.call_from_thread(lambda: self.query_one("#chatinput", Input).focus())
+            self.app.call_from_thread(lambda: self.query_one("#chatinput", ChatBox).focus())
 
 class SchedulerScreen(ModalScreen):
     """Scheduling: pasang/hapus cron pipeline harian dari dalam TUI (keyboard)."""
