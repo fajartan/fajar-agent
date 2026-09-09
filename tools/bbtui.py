@@ -870,6 +870,9 @@ SLASH_HELP = [
     ("/dedup [handle]", "kelas bug yang SUDAH dilaporkan di program"),
     ("/stage", "suruh agent lanjut ke tahap berikutnya"),
     ("/retry", "kirim ulang pesan terakhir (kalau API error/timeout)"),
+    ("/note <teks>", "catat temuan cepat ke workspace target (tanpa lewat agent)"),
+    ("/report [save]", "susun draf laporan; 'save' menyimpan jawaban agent terakhir"),
+    ("/ext", "kelola & jalankan ext-tools (nuclei/sqlmap/burp/dll)"),
     # -- sesi & konteks --
     ("/resume", "pilih riwayat chat dari pop-up lalu lanjutkan"),
     ("/new", "sesi baru (reset percakapan; memori tetap)"),
@@ -1456,6 +1459,33 @@ class LlmChatScreen(ModalScreen):
                         del self.messages[k]; break
                 log.write(f"[cyan]kirim ulang:[/] [dim]{escape_markup(last[:80])}[/]")
                 self._submit(last)
+        elif cmd == "note":
+            if not arg:
+                log.write("[yellow]pakai: /note <teks temuan>[/] [dim](tersimpan ke workspace target)[/]")
+            else:
+                prog = (self.target or {}).get("name") or "umum"
+                stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+                r = _llm_mod().t_save_note(program=prog, text=f"- [{stamp}] {arg}", kind="note")
+                log.write(f"[green]📝 catatan tersimpan[/] [dim]{escape_markup(r)}[/]")
+        elif cmd == "report":
+            if arg.lower().startswith("save"):
+                if not self._last_agent:
+                    log.write("[yellow]belum ada jawaban agent untuk disimpan.[/]")
+                else:
+                    prog = (self.target or {}).get("name") or "umum"
+                    r = _llm_mod().t_save_note(program=prog, text=self._last_agent, kind="report")
+                    log.write(f"[green]📄 draf laporan tersimpan[/] [dim]{escape_markup(r)}[/]")
+            else:
+                # tugas agent: muat playbook laporan, JANGAN submit (submit tetap milik user)
+                self._submit("susun DRAF LAPORAN untuk temuan sejauh ini: muat skill report-kit dan "
+                             "verify, ikuti templatenya (ringkasan, dampak, langkah reproduksi "
+                             "1-variabel, bukti, saran perbaikan), dan cek anti-duplikat. "
+                             "JANGAN submit ke platform -- berhenti di CHECKPOINT supaya saya review. "
+                             "Setelah itu saya simpan dengan /report save.")
+        elif cmd in ("ext", "ext-tools", "exttools"):
+            d = arg or (apex(self.target) if self.target else "")
+            log.write("[cyan]membuka ext-tools[/] [dim]" + (d or "tanpa target") + " -- esc utk batal[/]")
+            self.app.push_screen(ExternalToolsScreen(self.cfg, d))
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
         elif cmd == "redraw":
