@@ -872,6 +872,7 @@ SLASH_HELP = [
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
     ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=#/esc)"),
     ("/redraw", "gambar ulang layar (bersihkan sisa render terminal; = esc)"),
+    ("/mouse", "lepas/ambil mouse dari terminal (darurat kalau seleksi mouse bermasalah)"),
     ("/diag", "SIMPAN laporan diagnosa + screenshot ke ~/ (utk lapor bug render)"),
     ("/export", "SIMPAN percakapan ke .md (salin dari file, tanpa seleksi di TUI)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
@@ -1098,12 +1099,6 @@ class LlmChatScreen(ModalScreen):
         self.query_one("#chatstatus", Static).update(self._statusline())
     def _tick(self):
         self._refresh_bars()
-        # SELF-HEAL: tiap ~4s gambar ulang penuh. Kalau terminal sempat desync (scroll/tearing),
-        # sampah render hilang sendiri dalam beberapa detik tanpa user menekan apa pun.
-        self._tk_full = getattr(self, "_tk_full", 0) + 1
-        if self._tk_full % 6 == 0:
-            try: self.app.action_redraw()
-            except Exception: pass
         try:
             wrap = self.query_one("#thinkwrap")
             lbl = self.query_one("#thinklbl", Static); bar = self.query_one("#thinkbar", Static)
@@ -1176,8 +1171,8 @@ class LlmChatScreen(ModalScreen):
                 self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
             log.write("\n[dim]➤ [b]Enter[/]=kirim · [b]Alt+Enter[/] (atau Ctrl+J)=baris baru · ⏹/esc=stop · Ctrl+Q atau /quit=keluar[/]")
             log.write("[dim]Kotak chat MULTI-BARIS & tinggi tetap: teks panjang membungkus di dalam kotak lalu digulir sendiri - layout tak bergerak. Gulir chat: Ctrl+PgUp / Ctrl+PgDn.[/]")
-            log.write("[b yellow]📋 CARA SALIN yang pasti jalan:[/] tekan [b]F2[/] (MODE SALIN) -> sorot teks dengan mouse seperti teks biasa -> [b]Ctrl+Shift+C[/] -> [b]F2[/] lagi. Tempel: [b]Ctrl+Shift+V[/].")
-            log.write("[dim]Di MODE SALIN, terminal yang menyeleksi (app melepas mouse) - bebas glitch. Gulir: PgUp/PgDn. Atau [b]/export[/] utk simpan percakapan ke file lalu salin dari sana.[/]")
+            log.write("[dim]📋 salin: sorot teks dengan mouse → [b]Ctrl+C[/] · tempel [b]Ctrl+V[/] · 🔗 URL: Ctrl+Click[/]")
+            log.write("[dim]Butuh salinan panjang? [b]/export[/] simpan percakapan ke file .md.[/]")
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP...[/]"); self._mcp_connect()
         inp.focus()
@@ -1363,6 +1358,7 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
         elif cmd == "redraw": self.app.action_redraw()
+        elif cmd == "mouse": self.app.action_mouse_toggle()
         elif cmd == "diag": self._diag()
         elif cmd == "export": self._export()
         elif cmd in ("quit", "exit", "q", "keluar"):
@@ -1651,8 +1647,8 @@ class BBTUI(App):
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
-                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("ctrl+l", "redraw", "redraw"),
-                Binding("f2", "mouse_toggle", "mode salin", key_display="F2"), ("escape", "clear_search", "")]
+                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
+                ("escape", "clear_search", "")]   # redraw & mode-salin tak lagi di footer: glitch-nya sudah beres, salin cukup Ctrl+C. Sisa lewat /redraw dan /mouse.
     def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, icon="*")
@@ -1664,7 +1660,7 @@ class BBTUI(App):
                 yield DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
             yield VerticalScroll(Static("pilih program ->", id="detail"))
         yield Input(placeholder="cari nama/scope... (enter)", id="search")
-        yield Footer(show_command_palette=False)
+        yield Footer()   # ^p palette (ganti tema, cari perintah) TETAP tampil
     def _trace_on(self):
         """FAJAR_TRACE=1 -> rekam SEMUA byte yg app tulis ke terminal (diagnosa glitch)."""
         if str(os.environ.get("FAJAR_TRACE", "")).lower() not in ("1", "true", "yes", "on"):
