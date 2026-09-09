@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""FAJAR-AGENT (bbtui) — TUI modern (Textual): harness bug bounty 5 platform + recon/monitor/dedup + LLM agent.
+"""FAJAR-AGENT (bbtui) -- TUI modern (Textual): harness bug bounty 5 platform + recon/monitor/dedup + LLM agent.
 
 Full-screen: sidebar (stats+filter), DataTable program, panel detail scope, run-log streaming.
-Keybindings: / cari · r refresh · e recon · m monitor · d dedup · s settings · q keluar.
+Keybindings: / cari - r refresh - e recon - m monitor - d dedup - s settings - q keluar.
 Butuh: python3 + 'textual'  (pip install --user --break-system-packages textual  |  atau venv).
 Data: arkadiyt/bounty-targets-data. Enrichment provider opsional (jina gratis/firecrawl/serper/h1api).
 Companion headless: daily-target-finder.py
@@ -39,7 +39,7 @@ DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", 
                "telegram_bot_enabled": False, "telegram_allow_active": False, "telegram_allowlist": "",
                "llm_provider": "anthropic", "llm_model": "", "llm_base_url": "", "llm_api_key": "", "llm_context": 0,
                "mcp_servers": {},   # integrasi MCP: {"nama": {"command","args":[],"env":{},"trusted":false,"enabled":true}}
-               "external_tools": {   # integrasi tool lain (jalan bila terpasang) — {target}=domain {url} {handle}. Edit bebas.
+               "external_tools": {   # integrasi tool lain (jalan bila terpasang) -- {target}=domain {url} {handle}. Edit bebas.
                    # -- orkestrator recon --
                    "reconftw": "reconftw -d {target} -r",
                    "bbot": "bbot -t {target} -p subdomain-enum",
@@ -178,7 +178,7 @@ def norm(pf, p):
         ins = (p.get("targets") or {}).get("in_scope", [])
         ids = [t.get("endpoint") for t in ins if t.get("endpoint")]
         mn = (p.get("min_bounty") or {}).get("value"); mx = (p.get("max_bounty") or {}).get("value")
-        cur = {"USD": "$", "EUR": "€", "GBP": "£"}.get((p.get("max_bounty") or {}).get("currency") or "USD", "$")
+        cur = {"USD": "$", "EUR": "EUR", "GBP": "£"}.get((p.get("max_bounty") or {}).get("currency") or "USD", "$")
         return dict(platform="intigriti", key=f"it|{p.get('handle') or p.get('id')}", name=p.get("name"), url=p.get("url", ""),
                     bounty=bool(mx), bounty_min=(mn or None), bounty_max=(mx or None), cur=cur, maxsev="-", signal="-",
                     managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
@@ -191,7 +191,7 @@ def norm(pf, p):
                     bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", signal="-",
                     managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
                     scope=ids, wild=[x for x in ids if is_wild(x)])
-    if pf == "disclose":   # diodb — program independen/self-hosted/VDP (scope tak terstruktur → baca policy_url)
+    if pf == "disclose":   # diodb -- program independen/self-hosted/VDP (scope tak terstruktur -> baca policy_url)
         pol = p.get("policy_url")
         if not pol or str(p.get("policy_url_status", "")).lower() == "dead": return None
         return dict(platform="disclose", key=f"dio|{p.get('program_name') or pol}", name=p.get("program_name") or pol,
@@ -201,7 +201,7 @@ def norm(pf, p):
     return None
 
 def quiet_score(pr, is_new=False):
-    """Skor 0-100 'anti-ramai' — PROXY dari data yg benar2 ada (BUKAN jumlah hacker asli).
+    """Skor 0-100 'anti-ramai' -- PROXY dari data yg benar2 ada (BUKAN jumlah hacker asli).
     Makin tinggi = makin mungkin sepi/minim-duplikat. Heuristik transparan (lihat PROGRAM-SELECTION.md)."""
     s = 0
     if is_new: s += 35                                    # sinyal anti-ramai terkuat yg kita punya
@@ -292,7 +292,7 @@ def fetch_h1_private(cfg, have_keys, cap=60):
                 h = (it.get("attributes", {}) or {}).get("handle")
                 if not h: continue
                 key = f"h1|{h}"
-                if key in have_keys or key in out: continue   # sudah ada dari data publik → yg tersisa = private/baru
+                if key in have_keys or key in out: continue   # sudah ada dari data publik -> yg tersisa = private/baru
                 pr = _h1_detail(h, hdr)
                 if pr: out[key] = pr
                 if len(out) >= cap: return out, None
@@ -384,7 +384,7 @@ def load_programs(cfg):
                 if pr and passes(pr, cfg): cur[pr["key"]] = pr
         except Exception as e:
             errs.append(f"{pf}: {e}")
-    # + program PRIVATE dari akun (bila token diisi) — cakupan lebih luas lewat API token
+    # + program PRIVATE dari akun (bila token diisi) -- cakupan lebih luas lewat API token
     if cfg.get("h1_api_user") and cfg.get("h1_api_token"):
         priv, perr = fetch_h1_private(cfg, set(cur.keys()))
         for k, pr in priv.items():
@@ -428,7 +428,7 @@ def enrich(pr, cfg):
     else: return "provider tak dikenal"
     paid = "-"
     if re.search(r"paid|bounties|awarded", text, re.I):
-        m = re.search(r"[\$€£]\s?\d[\d,\.]*\s*[km]?", text, re.I); paid = m.group(0) if m else "-"
+        m = re.search(r"[\$EUR£]\s?\d[\d,\.]*\s*[km]?", text, re.I); paid = m.group(0) if m else "-"
     rep = (re.search(r"([\d,\.]+)\s*(?:reports?\s*resolved|resolved)", text, re.I) or [None, "-"])
     rep = rep.group(1) if hasattr(rep, "group") else "-"
     return f"provider={prov}\ntotal paid: {paid}\nreports resolved: {rep}"
@@ -474,57 +474,56 @@ def cron_active():
 CSS = """
 Screen { layout: vertical; background: $surface; }
 #body { height: 1fr; padding: 0 1; }
-#side { width: 32; padding: 1; border: round $primary; margin: 0 1 0 0; }
+#side { width: 32; padding: 1; border: ascii $primary; margin: 0 1 0 0; scrollbar-size: 0 0; }
 #stat { height: auto; }
-#tablewrap { width: 2fr; border: round $primary; }
-#detail { width: 1fr; border: round $accent; padding: 1; margin: 0 0 0 1; }
-DataTable { height: 1fr; background: $surface; }
+#tablewrap { width: 2fr; border: ascii $primary; }
+#detail { width: 1fr; border: ascii $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
+DataTable { height: 1fr; background: $surface; scrollbar-size: 0 0; }
 DataTable > .datatable--header { text-style: bold; background: $primary; }
 DataTable > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
-#search { dock: bottom; display: none; border: tall $accent; }
+#search { dock: bottom; display: none; border: ascii $accent; }
 #search.on { display: block; }
 .title { text-style: bold; color: $accent; }
 SplashScreen { align: center middle; }
-#splash { width: auto; height: auto; text-align: center; padding: 2 6; border: round $accent; background: $panel; }
+#splash { width: auto; height: auto; text-align: center; padding: 2 6; border: ascii $accent; background: $panel; }
 ModalScreen { align: center middle; }
-ModalScreen #stat { width: 84; max-height: 90%; border: round $accent; padding: 1 2; background: $panel; }
+ModalScreen #stat { width: 84; max-height: 90%; border: ascii $accent; padding: 1 2; background: $panel; }
 ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
-Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; }
-#chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; layers: base pop; }
+Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: ascii $primary; }
+#chatwrap { width: 100%; height: 100%; border: ascii $accent; background: $surface; layers: base pop; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
-#chatscroll { height: 1fr; background: $surface; }
+#chatscroll { height: 1fr; background: $surface; scrollbar-size: 0 0; }
 #chatlog { height: auto; padding: 0 1; }
 #chatstatus { height: 1; color: $accent; padding: 0 1; }
 #thinkwrap { height: 1; padding: 0 1; display: none; }
 #thinkwrap.on { display: block; }
 #thinklbl { width: auto; color: $accent; }
-#thinking { width: 1fr; }
-#thinking Bar > .bar--indeterminate { color: $accent; }
+#thinkbar { width: auto; color: $accent; padding: 0 0 0 1; }
 #chatbar { dock: bottom; height: 3; }
-#chatinput { width: 1fr; border: tall $accent; }
+#chatinput { width: 1fr; border: ascii $accent; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
-#slashbox { layer: pop; dock: bottom; offset: 0 -3; width: 100%; height: auto; max-height: 12; border: round $accent; background: $panel; display: none; }
+#slashbox { layer: pop; dock: bottom; offset: 0 -3; width: 100%; height: auto; max-height: 12; border: ascii $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
 
 BANNER = (
-    "██████╗ ██████╗ ████████╗██╗   ██╗██╗\n"
-    "██╔══██╗██╔══██╗╚══██╔══╝██║   ██║██║\n"
-    "██████╔╝██████╔╝   ██║   ██║   ██║██║\n"
-    "██╔══██╗██╔══██╗   ██║   ██║   ██║██║\n"
-    "██████╔╝██████╔╝   ██║   ╚██████╔╝██║\n"
-    "╚═════╝ ╚═════╝    ╚═╝    ╚═════╝ ╚═╝"
+    "######+ ######+ ########+##+   ##+##+\n"
+    "##+==##+##+==##++==##+==+##|   ##|##|\n"
+    "######++######++   ##|   ##|   ##|##|\n"
+    "##+==##+##+==##+   ##|   ##|   ##|##|\n"
+    "######++######++   ##|   +######++##|\n"
+    "+=====+ +=====+    +=+    +=====+ +=+"
 )
 
 class SplashScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         yield Static(f"{AGENT_BANNER}\n\n"
-                     f"[b]FAJAR-AGENT[/] v{AGENT_VERSION} — [b]Bug-Bounty Hunting Harness[/]\n"
-                     "[dim]5 platform · anti-dupe · recon · monitor · dedup · LLM agent[/]\n"
+                     f"[b]FAJAR-AGENT[/] v{AGENT_VERSION} -- [b]Bug-Bounty Hunting Harness[/]\n"
+                     "[dim]5 platform - anti-dupe - recon - monitor - dedup - LLM agent[/]\n"
                      "[dim]owner: researcher[/]\n\n"
-                     "[yellow]▶ tekan Enter untuk mulai[/]", id="splash")
+                     "[yellow]> tekan Enter untuk mulai[/]", id="splash")
     def on_key(self, event):
         event.stop(); self.app.pop_screen()
 
@@ -533,32 +532,32 @@ class HelpScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="stat"):
             yield Static(
-                "[b cyan]FAJAR-AGENT — Bantuan / Fitur[/]\n\n"
+                "[b cyan]FAJAR-AGENT -- Bantuan / Fitur[/]\n\n"
                 "[b]Navigasi[/]\n"
-                "  ↑/↓ pindah baris   /  cari nama/scope   r  refresh   q  keluar   ?  bantuan\n"
-                "  [yellow]b[/] tampilkan HANYA program BARU (🆕)   [yellow]c[/] ganti urutan (platform→quiet→reward→assets)\n\n"
-                "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] — PROXY dari data nyata: baru + scope besar +\n"
+                "  ^/v pindah baris   /  cari nama/scope   r  refresh   q  keluar   ?  bantuan\n"
+                "  [yellow]b[/] tampilkan HANYA program BARU (🆕)   [yellow]c[/] ganti urutan (platform->quiet->reward->assets)\n\n"
+                "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
                 "  aset niche (android/ios/api) + unmanaged + program kurang 'dioptimalkan'. Makin tinggi = makin\n"
-                "  mungkin sepi/minim-duplikat. [dim]Bukan hitungan hacker asli — itu tak ada di data gratis.[/]\n\n"
+                "  mungkin sepi/minim-duplikat. [dim]Bukan hitungan hacker asli -- itu tak ada di data gratis.[/]\n\n"
                 "[b]Aksi pada program tersorot[/] (target auto-terisi, bisa diedit/ketik manual):\n"
-                "  [yellow]e[/] Recon      → extract web: subdomain+httpx+katana+JS+endpoint+gf → ~/bb-recon/\n"
+                "  [yellow]e[/] Recon      -> extract web: subdomain+httpx+katana+JS+endpoint+gf -> ~/bb-recon/\n"
                 "                (pilih profil: passive / standard / deep)\n"
-                "  [yellow]m[/] Monitor    → pantau subdomain BARU (multi-sumber) → ~/bb-monitor/ (cocok di-cron)\n"
-                "  [yellow]d[/] Dedup      → kelas bug yang SUDAH dilaporkan di program → known-issues.md\n"
-                "  [yellow]w[/] Workspace  → buat folder target ~/bb-workspaces/<nama>/ (scope ter-seed)\n"
-                "  [yellow]n[/] Notify     → kirim program ini ke Telegram/Discord\n"
-                "  [yellow]x[/] Ext-tools  → jalankan tool lain (hermes/neurosploit/nuclei/sqlmap) via command template\n"
-                "  [yellow]p[/] Pipeline   → jalankan rangkaian OTOMATIS sekarang (finder→scope.md→dedup→recon)\n"
-                "  [yellow]g[/] Jadwal     → SCHEDULING: pasang/hapus cron pipeline harian (dari TUI)\n"
-                "  [yellow]l[/] LLM Agent  → CHAT harness bertahap (ala Hermes/OpenCode/Claude Code): goal → tahap → 'lanjut'.\n"
-                "               status bar REAL (aktivitas·token·konteks%·auto-compact) · slash: /help /yolo /model /new\n"
-                "               /clear /resume /memory /skills /tools /context /compact /status · ctrl+a yolo · ctrl+o model\n\n"
+                "  [yellow]m[/] Monitor    -> pantau subdomain BARU (multi-sumber) -> ~/bb-monitor/ (cocok di-cron)\n"
+                "  [yellow]d[/] Dedup      -> kelas bug yang SUDAH dilaporkan di program -> known-issues.md\n"
+                "  [yellow]w[/] Workspace  -> buat folder target ~/bb-workspaces/<nama>/ (scope ter-seed)\n"
+                "  [yellow]n[/] Notify     -> kirim program ini ke Telegram/Discord\n"
+                "  [yellow]x[/] Ext-tools  -> jalankan tool lain (hermes/neurosploit/nuclei/sqlmap) via command template\n"
+                "  [yellow]p[/] Pipeline   -> jalankan rangkaian OTOMATIS sekarang (finder->scope.md->dedup->recon)\n"
+                "  [yellow]g[/] Jadwal     -> SCHEDULING: pasang/hapus cron pipeline harian (dari TUI)\n"
+                "  [yellow]l[/] LLM Agent  -> CHAT harness bertahap (ala Hermes/OpenCode/Claude Code): goal -> tahap -> 'lanjut'.\n"
+                "               status bar REAL (aktivitas-token-konteks%-auto-compact) - slash: /help /yolo /model /new\n"
+                "               /clear /resume /memory /skills /tools /context /compact /status - ctrl+a yolo - ctrl+o model\n\n"
                 "[b]Settings[/] ([yellow]s[/]):\n"
                 "  KRITERIA: platform, min bounty, wajib-wildcard\n"
                 "  ENRICHMENT: provider (jina gratis / firecrawl / serper / h1api) + API key\n"
                 "  NOTIFIKASI: Telegram bot token+chat id, Discord webhook\n\n"
-                "[b]External tools[/]: edit [b]~/.config/bbtui/config.json[/] → external_tools {nama: \"cmd {target}\"}.\n"
-                "[b]Kolom[/]: Program · Plat · Reward · WC(wildcard) · Aset · Sev.  [dim]esc = tutup[/]"
+                "[b]External tools[/]: edit [b]~/.config/bbtui/config.json[/] -> external_tools {nama: \"cmd {target}\"}.\n"
+                "[b]Kolom[/]: Program - Plat - Reward - WC(wildcard) - Aset - Sev.  [dim]esc = tutup[/]"
             )
     def action_dummy(self): pass
 
@@ -567,8 +566,8 @@ class SettingsScreen(ModalScreen):
     def __init__(self, cfg): super().__init__(); self.cfg = cfg
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="stat"):
-            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] atau tombol Simpan = simpan · Enter di field = simpan · esc = batal TANPA simpan)", classes="title")
-            yield Label("\n[b yellow]— KRITERIA PENCARIAN —[/]")
+            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] atau tombol Simpan = simpan - Enter di field = simpan - esc = batal TANPA simpan)", classes="title")
+            yield Label("\n[b yellow]-- KRITERIA PENCARIAN --[/]")
             yield Label("Platform (6 sumber OTONOM, pisah koma): hackerone, bugcrowd, yeswehack, intigriti, federacy, disclose")
             yield Label("[dim]disclose = 2400+ program independen/VDP (matikan 'wajib wildcard' utk lihat). Program PRIVATE H1 otomatis ikut bila h1 token diisi (🔒).[/]")
             yield Input(value=",".join(self.cfg.get("platforms", [])), id="plat")
@@ -578,10 +577,10 @@ class SettingsScreen(ModalScreen):
             yield Input(value="y" if self.cfg["require_wildcard"] else "n", id="wc")
             yield Label("Jenis/fokus aset (kosong=semua; pisah koma): web, android, ios, api, mobile")
             yield Input(value=self.cfg.get("asset_type", ""), id="atype")
-            yield Label("\n[b yellow]— KRITERIA LANJUTAN (0/kosong/any = abaikan) —[/]")
+            yield Label("\n[b yellow]-- KRITERIA LANJUTAN (0/kosong/any = abaikan) --[/]")
             yield Label("[dim]Semua di bawah berlaku LINTAS-PLATFORM. Yg berbasis data khusus (sev/efficiency/waktu) hanya "
-                        "menyaring di platform yg menyediakannya (kini: HackerOne) — platform lain tidak dibuang.[/]")
-            yield Label("Min skor QUIET 0-100 — [b]semua platform[/] (anti-ramai: baru+scope besar+niche+unmanaged)")
+                        "menyaring di platform yg menyediakannya (kini: HackerOne) -- platform lain tidak dibuang.[/]")
+            yield Label("Min skor QUIET 0-100 -- [b]semua platform[/] (anti-ramai: baru+scope besar+niche+unmanaged)")
             yield Input(value=str(self.cfg.get("min_quiet", 0)), id="mq")
             yield Label("Urutkan: platform | quiet | reward | assets  (atau tekan c di layar utama)")
             yield Input(value=self.cfg.get("sort", "platform"), id="sort")
@@ -594,7 +593,7 @@ class SettingsScreen(ModalScreen):
             yield Input(value=self.cfg.get("managed_filter", "any"), id="mgd")
             yield Label("Min severity ceiling (H1 saja): kosong | low | medium | high | critical")
             yield Input(value=self.cfg.get("min_sev", ""), id="msev")
-            yield Label("[dim]— khusus HackerOne (dari data program): —[/]")
+            yield Label("[dim]-- khusus HackerOne (dari data program): --[/]")
             yield Label("Min response efficiency % (0=abaikan)")
             yield Input(value=str(self.cfg.get("min_efficiency", 0)), id="meff")
             yield Label("Max jam rata2 respon pertama / Max jam rata2 bayar (0=abaikan)")
@@ -602,31 +601,31 @@ class SettingsScreen(ModalScreen):
             yield Input(value=str(self.cfg.get("max_ttb", 0)), id="mttb")
             yield Label("[dim]CATATAN JUJUR: jumlah hacker terdaftar & total bounty dibayar TIDAK ada di data gratis "
                         "(hanya di halaman program). Q = proxy anti-ramai, bukan hitungan hacker asli.[/]")
-            yield Label("\n[b yellow]— ENRICHMENT (opsional) —[/]")
+            yield Label("\n[b yellow]-- ENRICHMENT (opsional) --[/]")
             yield Label(f"Provider: {', '.join(PROVIDERS)}  (jina = gratis tanpa key)")
             yield Input(value=self.cfg.get("enrich_provider", "jina"), id="prov")
             yield Label("firecrawl_api_key"); yield Input(value=self.cfg.get("firecrawl_api_key", ""), id="fc", password=True)
             yield Label("serper_api_key"); yield Input(value=self.cfg.get("serper_api_key", ""), id="sp", password=True)
-            yield Label("h1_api_user + token → tarik program yg BISA KAMU AKSES termasuk PRIVATE/invite (via API resmi H1). Buat token: hackerone.com/settings/api_token")
+            yield Label("h1_api_user + token -> tarik program yg BISA KAMU AKSES termasuk PRIVATE/invite (via API resmi H1). Buat token: hackerone.com/settings/api_token")
             yield Label("h1_api_user"); yield Input(value=self.cfg.get("h1_api_user", ""), id="h1u")
             yield Label("h1_api_token"); yield Input(value=self.cfg.get("h1_api_token", ""), id="h1t", password=True)
-            yield Label("[dim]Token platform lain (disimpan; auto-pull program-private penuh baru H1. BC/Intigriti/YWH pakai OAuth → dipakai enrichment/manual):[/]")
+            yield Label("[dim]Token platform lain (disimpan; auto-pull program-private penuh baru H1. BC/Intigriti/YWH pakai OAuth -> dipakai enrichment/manual):[/]")
             yield Label("bugcrowd_api_token"); yield Input(value=self.cfg.get("bugcrowd_api_token", ""), id="bct", password=True)
             yield Label("intigriti_api_token"); yield Input(value=self.cfg.get("intigriti_api_token", ""), id="itt", password=True)
             yield Label("yeswehack_api_token"); yield Input(value=self.cfg.get("yeswehack_api_token", ""), id="ywt", password=True)
-            yield Label("\n[b yellow]— NOTIFIKASI —[/]")
+            yield Label("\n[b yellow]-- NOTIFIKASI --[/]")
             yield Label("Telegram bot token"); yield Input(value=self.cfg.get("telegram_token", ""), id="ntg", password=True)
             yield Label("Telegram chat id"); yield Input(value=self.cfg.get("telegram_chat", ""), id="ntc")
             yield Label("Discord webhook URL"); yield Input(value=self.cfg.get("discord_webhook", ""), id="ndc", password=True)
-            yield Label("\n[b yellow]— TELEGRAM BOT (FAJAR-AGENT) —[/]")
+            yield Label("\n[b yellow]-- TELEGRAM BOT (FAJAR-AGENT) --[/]")
             yield Label("[dim]Pakai token+chat di atas. Jalankan bot: [b]bb.py telegram[/]. Chat id? kirim /start ke bot.[/]")
-            yield Label("Aktifkan bot? (y/n) — master switch, bot menolak start bila 'n'")
+            yield Label("Aktifkan bot? (y/n) -- master switch, bot menolak start bila 'n'")
             yield Input(value="y" if self.cfg.get("telegram_bot_enabled") else "n", id="tgen")
-            yield Label("Default aksi-aktif/traffic saat bot mulai? (y/n) — aman: n (harus /yolo di chat)")
+            yield Label("Default aksi-aktif/traffic saat bot mulai? (y/n) -- aman: n (harus /yolo di chat)")
             yield Input(value="y" if self.cfg.get("telegram_allow_active") else "n", id="tgact")
             yield Label("Allowlist chat id tambahan (pisah koma; kosong = hanya owner di 'Telegram chat id')")
             yield Input(value=self.cfg.get("telegram_allowlist", ""), id="tgallow")
-            yield Label("\n[b yellow]— LLM AGENT (otak otonom, opsional) —[/]")
+            yield Label("\n[b yellow]-- LLM AGENT (otak otonom, opsional) --[/]")
             yield Label("provider: anthropic | openai (openai = kompatibel Groq/OpenRouter/Ollama)")
             yield Input(value=self.cfg.get("llm_provider", "anthropic"), id="lprov")
             yield Label("model (mis. claude-sonnet-5 / gpt-4o-mini / llama3.1)")
@@ -637,10 +636,10 @@ class SettingsScreen(ModalScreen):
             yield Label("llm_context (override context window token; 0 = auto dari model)")
             yield Input(value=str(self.cfg.get("llm_context", 0)), id="lctx")
             mcps = self.cfg.get("mcp_servers") or {}
-            yield Label(f"[dim]MCP: {len(mcps)} server terdaftar. Edit di ~/.config/bbtui/config.json → \"mcp_servers\": "
+            yield Label(f"[dim]MCP: {len(mcps)} server terdaftar. Edit di ~/.config/bbtui/config.json -> \"mcp_servers\": "
                         "{{\"nama\": {{\"command\":\"npx\",\"args\":[...],\"trusted\":false}}}}. Di chat: /mcp connect.[/]")
             yield Label("[dim]Tool eksternal (hermes/neurosploit/nuclei): tekan x di layar utama untuk kelola.[/]")
-            yield Label("\n[b green]▶ SIMPAN: tekan Ctrl+S  (atau Enter di kotak isian mana pun)[/]  ·  [dim]esc = batal tanpa simpan[/]")
+            yield Label("\n[b green]> SIMPAN: tekan Ctrl+S  (atau Enter di kotak isian mana pun)[/]  -  [dim]esc = batal tanpa simpan[/]")
     def on_input_submitted(self, _): self.action_save()
     def action_save(self):
         def g(i):
@@ -676,8 +675,8 @@ class SettingsScreen(ModalScreen):
             save_cfg(self.cfg)
             self.app.pop_screen()
             if ignored:
-                self.app.notify(f"⚠ platform diabaikan (hanya {', '.join(PLAT_ALL)}): {', '.join(ignored)}", severity="warning")
-            self.app.notify(f"✅ tersimpan → {CFG} (tekan r untuk refresh)")
+                self.app.notify(f"! platform diabaikan (hanya {', '.join(PLAT_ALL)}): {', '.join(ignored)}", severity="warning")
+            self.app.notify(f"✅ tersimpan -> {CFG} (tekan r untuk refresh)")
         except Exception as e:
             self.app.notify(f"❌ gagal simpan: {e}", severity="error")
 
@@ -703,19 +702,19 @@ class RunScreen(ModalScreen):
             self.app.call_from_thread(log.write, f"[red]{e}[/]")
 
 class ToolScreen(ModalScreen):
-    """Jalankan recon/monitor/dedup — target dari pilihan ATAU ketik manual."""
+    """Jalankan recon/monitor/dedup -- target dari pilihan ATAU ketik manual."""
     BINDINGS = [("escape", "app.pop_screen", "batal")]
     def __init__(self, kind, default=""): super().__init__(); self.kind = kind; self.default = default
     def compose(self) -> ComposeResult:
         with Vertical(id="stat"):
-            yield Label(f"[b cyan]{self.kind.upper()}[/]  — target dari pilihan atau ketik manual, lalu [b]Enter[/]", classes="title")
+            yield Label(f"[b cyan]{self.kind.upper()}[/]  -- target dari pilihan atau ketik manual, lalu [b]Enter[/]", classes="title")
             hint = {"recon": "domain, mis. wolt.com", "monitor": "domain, mis. wolt.com", "dedup": "handle/URL, mis. whatnot"}[self.kind]
             yield Input(value=self.default, id="tgt", placeholder=hint)
             if self.kind == "recon":
-                yield Label("Profil: [b]passive[/] (tak kirim) · [b]standard[/] (extract web: httpx+katana+JS+endpoint) · [b]deep[/] (scan)")
+                yield Label("Profil: [b]passive[/] (tak kirim) - [b]standard[/] (extract web: httpx+katana+JS+endpoint) - [b]deep[/] (scan)")
                 yield Input(value="standard", id="prof")
-                yield Static("[yellow]standard/deep mengirim request ke target — pastikan in-scope.[/]")
-            yield Static("[dim]Enter = jalankan · esc = batal[/]")
+                yield Static("[yellow]standard/deep mengirim request ke target -- pastikan in-scope.[/]")
+            yield Static("[dim]Enter = jalankan - esc = batal[/]")
     def on_mount(self): self.query_one("#tgt", Input).focus()
     def on_input_submitted(self, _):
         tgt = self.query_one("#tgt", Input).value.strip()
@@ -732,13 +731,13 @@ class ToolScreen(ModalScreen):
         self.app.pop_screen(); self.app.push_screen(RunScreen(cmd, title))
 
 class ExternalToolsScreen(ModalScreen):
-    """Integrasi tool bug hunting lain — LIST + TAMBAH + HAPUS + JALANKAN, semua dari TUI."""
+    """Integrasi tool bug hunting lain -- LIST + TAMBAH + HAPUS + JALANKAN, semua dari TUI."""
     BINDINGS = [("escape", "app.pop_screen", "batal")]
     def __init__(self, cfg, default=""): super().__init__(); self.cfg = cfg; self.default = default
     def compose(self) -> ComposeResult:
         ext = self.cfg.get("external_tools", {})
         with VerticalScroll(id="stat"):
-            yield Label("[b cyan]EXTERNAL TOOLS[/] — kelola & jalankan tool bug hunting lain", classes="title")
+            yield Label("[b cyan]EXTERNAL TOOLS[/] -- kelola & jalankan tool bug hunting lain", classes="title")
             yield Label("Target (dari pilihan / ketik manual):")
             yield Input(value=self.default, id="xtgt")
             if ext:
@@ -747,13 +746,13 @@ class ExternalToolsScreen(ModalScreen):
                     yield Static(f"  [yellow]{i}[/] [b]{name}[/]  [dim]{cmd}[/]")
             else:
                 yield Static("\n[yellow]Belum ada tool. Tambahkan di bawah.[/]")
-            yield Label("\n[b green]JALANKAN[/] — nomor tool → Enter:")
+            yield Label("\n[b green]JALANKAN[/] -- nomor tool -> Enter:")
             yield Input(placeholder="mis. 1", id="xnum")
-            yield Label("[b green]TAMBAH[/] — format  [b]nama = perintah[/]  (pakai {target}/{url}/{handle}) → Enter:")
+            yield Label("[b green]TAMBAH[/] -- format  [b]nama = perintah[/]  (pakai {target}/{url}/{handle}) -> Enter:")
             yield Input(placeholder="mis. sqlmap = sqlmap -u {url} --batch", id="xadd")
-            yield Label("[b red]HAPUS[/] — nomor tool → Enter:")
+            yield Label("[b red]HAPUS[/] -- nomor tool -> Enter:")
             yield Input(placeholder="mis. 2", id="xdel")
-            yield Static("\n[dim]Placeholder: {target}=domain · {url} · {handle}=nama program. Tersimpan ke ~/.config/bbtui/config.json. esc=tutup[/]")
+            yield Static("\n[dim]Placeholder: {target}=domain - {url} - {handle}=nama program. Tersimpan ke ~/.config/bbtui/config.json. esc=tutup[/]")
     def on_mount(self):
         try: self.query_one("#xnum", Input).focus()
         except Exception: pass
@@ -773,7 +772,7 @@ class ExternalToolsScreen(ModalScreen):
             try: idx = int(ev.value.strip()) - 1
             except Exception: self.app.notify("nomor tidak valid"); return
             if not (0 <= idx < len(items)): self.app.notify("nomor di luar daftar"); return
-            gone = items[idx][0]; del ext[gone]; save_cfg(self.cfg); self.app.notify(f"🗑 '{gone}' dihapus"); self._refresh(); return
+            gone = items[idx][0]; del ext[gone]; save_cfg(self.cfg); self.app.notify(f"x '{gone}' dihapus"); self._refresh(); return
         # default: jalankan (xnum)
         items = list(ext.items())
         if not items: self.app.notify("belum ada tool"); return
@@ -784,7 +783,7 @@ class ExternalToolsScreen(ModalScreen):
         if not tgt: self.app.notify("target kosong"); return
         name, tmpl = items[idx]
         cmd = tmpl.replace("{target}", tgt).replace("{url}", tgt if tgt.startswith("http") else "https://" + tgt).replace("{handle}", tgt)
-        self.app.pop_screen(); self.app.push_screen(RunScreen(shlex.split(cmd), f"{name} · {tgt}"))
+        self.app.pop_screen(); self.app.push_screen(RunScreen(shlex.split(cmd), f"{name} - {tgt}"))
 
 _LLM_MOD = None
 def _llm_mod():
@@ -805,14 +804,14 @@ def _llm_creds(cfg):
     return prov, model, base, key
 
 class ModelPickerScreen(ModalScreen):
-    """Ambil daftar model dari API provider (pakai kunci) lalu pilih — bebas ganti model kapan saja."""
+    """Ambil daftar model dari API provider (pakai kunci) lalu pilih -- bebas ganti model kapan saja."""
     BINDINGS = [("escape", "app.pop_screen", "tutup")]
     def __init__(self, cfg, on_pick): super().__init__(); self.cfg = cfg; self.on_pick = on_pick; self.models = []
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="stat"):
-            yield Label("[b cyan]PILIH MODEL[/] — diambil live dari provider via API key", classes="title")
-            yield Static("mengambil daftar model…", id="mlist")
-            yield Label("Ketik nomor / nama model → Enter:")
+            yield Label("[b cyan]PILIH MODEL[/] -- diambil live dari provider via API key", classes="title")
+            yield Static("mengambil daftar model...", id="mlist")
+            yield Label("Ketik nomor / nama model -> Enter:")
             yield Input(placeholder="mis. 3  atau  claude-sonnet-5", id="mpick")
             yield Static("[dim]esc = tutup[/]")
     def on_mount(self): self.fetch()
@@ -836,16 +835,16 @@ class ModelPickerScreen(ModalScreen):
 
 AGENT_NAME = "FAJAR-AGENT"
 AGENT_VERSION = "1.1"
-AGENT_TAGLINE = "Bug-Bounty Hunting Harness — bertahap, memori jangka panjang, kontrol manusia"
-# logo "FAJAR" gradasi sunrise (kuning → oranye), diakhiri wordmark AGENT
+AGENT_TAGLINE = "Bug-Bounty Hunting Harness -- bertahap, memori jangka panjang, kontrol manusia"
+# logo "FAJAR" gradasi sunrise (kuning -> oranye), diakhiri wordmark AGENT
 AGENT_BANNER = (
-    "[b #ffd23f]███████╗ █████╗      ██╗ █████╗ ██████╗ [/]\n"
-    "[b #ffb627]██╔════╝██╔══██╗     ██║██╔══██╗██╔══██╗[/]\n"
-    "[b #ff9e2c]█████╗  ███████║     ██║███████║██████╔╝[/]\n"
-    "[b #ff8c33]██╔══╝  ██╔══██║██   ██║██╔══██║██╔══██╗[/]\n"
-    "[b #ff7a3d]██║     ██║  ██║╚█████╔╝██║  ██║██║  ██║[/]\n"
-    "[b #ff6b45]╚═╝     ╚═╝  ╚═╝ ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝[/]\n"
-    "[dim]        🌅  A · G · E · N · T[/]"
+    "[b #ffd23f]#######+ #####+      ##+ #####+ ######+ [/]\n"
+    "[b #ffb627]##+====+##+==##+     ##|##+==##+##+==##+[/]\n"
+    "[b #ff9e2c]#####+  #######|     ##|#######|######++[/]\n"
+    "[b #ff8c33]##+==+  ##+==##|##   ##|##+==##|##+==##+[/]\n"
+    "[b #ff7a3d]##|     ##|  ##|+#####++##|  ##|##|  ##|[/]\n"
+    "[b #ff6b45]+=+     +=+  +=+ +====+ +=+  +=++=+  +=+[/]\n"
+    "[dim]        🌅  A - G - E - N - T[/]"
 )
 TOOL_GROUPS = [
     ("program", ["list_programs", "new_programs", "program_detail"]),
@@ -869,12 +868,12 @@ SLASH_HELP = [
     ("/add <path>", "upload/ingest file atau folder projek ke konteks (drag path juga bisa)"),
     ("/mcp [connect]", "status / connect server MCP (integrasi eksternal)"),
     ("/context", "info pemakaian konteks (token/window)"), ("/compact", "ringkas konteks sekarang (hemat token)"),
-    ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=⏹/esc)"),
+    ("/status", "info kondisi agent"), ("/stop", "HENTIKAN proses agent yg sedang jalan (=#/esc)"),
     ("/quit", "KELUAR sesi chat (esc sengaja TIDAK menutup)"),
 ]
 
 def classify_assets(scope):
-    """Kelompokkan aset in-scope per jenis → menentukan skill & pendekatan."""
+    """Kelompokkan aset in-scope per jenis -> menentukan skill & pendekatan."""
     web, api, android, ios, other = [], [], [], [], []
     for s in scope:
         sl = str(s).lower()
@@ -886,12 +885,12 @@ def classify_assets(scope):
     return {"web": web, "api": api, "android": android, "ios": ios, "other": other}
 
 def program_context(pr):
-    """SKEMA EKSTRAKSI: ubah 1 program → brief terstruktur utk LLM (sumber scope resmi + rute skill)."""
+    """SKEMA EKSTRAKSI: ubah 1 program -> brief terstruktur utk LLM (sumber scope resmi + rute skill)."""
     g = classify_assets(pr.get("scope", []))
     present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
     skill_map = {"web": "web-vuln-classes", "api": "api-pentest", "android": "mobile-pentest", "ios": "mobile-pentest"}
     skills = sorted({skill_map[k] for k in present if k in skill_map}) or ["web-vuln-classes"]
-    L = ["[TARGET CONTEXT] — sumber scope RESMI dari TUI (jangan cari/riset ulang; jangan program_detail).",
+    L = ["[TARGET CONTEXT] -- sumber scope RESMI dari TUI (jangan cari/riset ulang; jangan program_detail).",
          f"nama       : {pr.get('name')}",
          f"platform   : {pr.get('platform')}",
          f"url_rules  : {pr.get('url','')}",
@@ -905,11 +904,11 @@ def program_context(pr):
     for k in present:
         L.append(f"aset {k} ({len(g[k])}):")
         L += ["  - " + str(x) for x in g[k][:50]]
-        if len(g[k]) > 50: L.append(f"  … +{len(g[k])-50} lagi")
+        if len(g[k]) > 50: L.append(f"  ... +{len(g[k])-50} lagi")
     return "\n".join(L)
 
 def _md_line(raw):
-    """Konversi 1 baris markdown → Rich markup rapi (buang '#', **tebal**, `kode`); escape '[..]' agar [FAKTA] tak hilang."""
+    """Konversi 1 baris markdown -> Rich markup rapi (buang '#', **tebal**, `kode`); escape '[..]' agar [FAKTA] tak hilang."""
     from rich.markup import escape
     import re as _re
     raw = raw.rstrip("\n")
@@ -919,14 +918,14 @@ def _md_line(raw):
         s = _re.sub(r"\*\*(.+?)\*\*", r"[b]\1[/]", s)
         s = _re.sub(r"(?<!\*)\*(?!\s)([^*]+?)\*(?!\*)", r"[i]\1[/]", s)
         s = _re.sub(r"`([^`]+)`", r"[cyan]\1[/]", s)
-        # URL → link clickable (Ctrl+Click buka browser di terminal yg dukung)
+        # URL -> link clickable (Ctrl+Click buka browser di terminal yg dukung)
         s = _re.sub(r"(https?://[^\s\]\)>'\"]+)", r"[link=\1][u cyan]\1[/u cyan][/link]", s)
         return s
-    if hashes and st[hashes:hashes + 1] == " ":            # heading → tebal polos (tenang), tanpa '#'
+    if hashes and st[hashes:hashes + 1] == " ":            # heading -> tebal polos (tenang), tanpa '#'
         return "[b]" + inline(escape(st[hashes:].strip())) + "[/]"
     # bullet rapi
     body = escape(raw)
-    body = _re.sub(r"^(\s*)[-*]\s+", r"\1• ", body)
+    body = _re.sub(r"^(\s*)[-*]\s+", r"\1* ", body)
     return inline(body)
 
 class SelectableLog(Static):
@@ -965,7 +964,7 @@ class ChatInput(Input):
             sel = self.selection
             if sel.is_empty: self.insert_text_at_cursor(clean)
             else: self.replace(clean, *sel)
-        # GHOST-FIX: highlight seleksi chat (yg dibuat utk copy) sering nyangkut saat paste →
+        # GHOST-FIX: highlight seleksi chat (yg dibuat utk copy) sering nyangkut saat paste ->
         # status/kotak tergambar dobel. Bersihkan seleksi + paksa repaint penuh sekali.
         try: self.screen.clear_selection()
         except Exception: pass
@@ -973,7 +972,7 @@ class ChatInput(Input):
         except Exception: pass
 
 class LlmChatScreen(ModalScreen):
-    """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
+    """Chat LLM ala Hermes/OpenCode/Claude Code -- status bar, slash-commands, alur BERTAHAP rapi."""
     BINDINGS = [("escape", "soft_escape", "stop"), ("ctrl+q", "quit_chat", "keluar"), ("ctrl+a", "toggle_active", "yolo"),
                 ("ctrl+o", "pick_model", "model"), ("ctrl+r", "resume", "resume"), ("ctrl+l", "clear", "clear")]
     def __init__(self, cfg, target=None):
@@ -983,12 +982,12 @@ class LlmChatScreen(ModalScreen):
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
         self.sess_start = datetime.datetime.now(); self._tk = 0; self._last_agent = ""
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
-        # sesi di-key PER TARGET → tiap program punya riwayat sendiri (tak saling timpa)
+        # sesi di-key PER TARGET -> tiap program punya riwayat sendiri (tak saling timpa)
         base = (target.get("key") or target.get("name")) if target else "general"
         self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
-    THINK_KAO = ["(°□°)", "(￣▽￣)", "( ˘•ω•˘ )", "(⌐■_■)", "(¬_¬ )", "(๑•̀ㅂ•́)و", "(°▽°)", "( •̀ ω •́ )"]
-    THINK_WORD = ["musing…", "berpikir…", "menganalisa…", "merangkai hipotesis…", "menimbang…",
-                  "meracik payload…", "menyusun rencana…", "menelusuri scope…", "brainstorming…"]
+    THINK_KAO = ["(o_o)", "(*_*)", "(-_-)", "(o.O)", "(^_^)", "(>_<)", "(~_~)", "(=_=)"]
+    THINK_WORD = ["musing...", "berpikir...", "menganalisa...", "merangkai hipotesis...", "menimbang...",
+                  "meracik payload...", "menyusun rencana...", "menelusuri scope...", "brainstorming..."]
     def compose(self) -> ComposeResult:
         _p, _m, _b, key = _llm_creds(self.cfg)
         with Vertical(id="chatwrap"):
@@ -997,41 +996,41 @@ class LlmChatScreen(ModalScreen):
                 yield SelectableLog(id="chatlog", markup=True)
             with Horizontal(id="thinkwrap"):    # indikator loading DI ATAS baris info
                 yield Static("⏳ memproses", id="thinklbl")
-                yield ProgressBar(id="thinking", show_percentage=False, show_eta=False, total=100)
+                yield Static("", id="thinkbar")   # bar ASCII sendiri (ProgressBar Textual pakai U+2501/U+257A = ambiguous)
             yield Static(self._statusline(), id="chatstatus")
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
-                yield Button("⏹", id="btnstop", variant="error")
-                yield ChatInput(placeholder=("ketik goal atau /  (daftar perintah)  ·  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
-                yield Button("➤ Kirim", id="btnsend", variant="success")
+                yield Button("#", id="btnstop", variant="error")
+                yield ChatInput(placeholder=("ketik goal atau /  (daftar perintah)  -  'lanjut' tiap checkpoint" if key else "set API key dulu (Settings s)"), id="chatinput")
+                yield Button("> Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
         yolo = "[black on yellow] ⚡YOLO [/]" if self.allow_gated else "[dim]aktif:off[/]"
-        return f" ◤ {AGENT_NAME} v{AGENT_VERSION} ◢  [b]{model}[/] · {prov}  ·  [dim]{self.sid}[/]  {yolo}"
+        return f" < {AGENT_NAME} v{AGENT_VERSION} >  [b]{model}[/] - {prov}  -  [dim]{self.sid}[/]  {yolo}"
     @staticmethod
     def _h(n):
         return f"{n/1000:.1f}K" if n >= 1000 else str(int(n))
     def _ctxbar(self):
-        if not self.window: return "ctx —"
+        if not self.window: return "ctx --"
         pct = min(100, int(self.ctx * 100 / self.window))
         fill = pct * 10 // 100
         col = "green" if pct < 60 else ("yellow" if pct < 85 else "red")
-        bar = f"[{col}]" + "█" * fill + "[/]" + "░" * (10 - fill)
+        bar = f"[{col}]" + "#" * fill + "[/]" + "." * (10 - fill)
         return f"ctx {bar} {self._h(self.ctx)}/{self._h(self.window)} ({pct}%)"
     def _statusline(self):
-        dot = {"idle": "[green]●[/]", "checkpoint": "[yellow]⏸[/]", "auto-compact": "[magenta]⟳[/]"}.get(self.activity, "[cyan]◉[/]")
+        dot = {"idle": "[green]*[/]", "checkpoint": "[yellow]=[/]", "auto-compact": "[magenta]~[/]"}.get(self.activity, "[cyan]o[/]")
         act = "idle" if not self.busy and self.activity in ("idle", "checkpoint") else self.activity
-        tok = f"⇅ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
+        tok = f"^ {self._h(self.tok_in)}/{self._h(self.tok_out)}"
         now = datetime.datetime.now()
         if self.busy and self.t0:
             el = (now - self.t0).total_seconds()
-            clock = f"  │  ⏱ {el:.0f}s · {self.tok_out/max(el,1):.0f} t/s"
+            clock = f"  |  t {el:.0f}s - {self.tok_out/max(el,1):.0f} t/s"
         else:
             up = int((now - self.sess_start).total_seconds())
-            clock = f"  │  ⏱ sesi {up//60}m{up%60:02d}s"
-        cmp = f"  │  [magenta]compact×{self.compacts}[/]" if self.compacts else ""
-        return (f"{dot} [b]{act}[/]  │  {self._ctxbar()}  │  {tok} tok{clock}  │  giliran {self.turns}{cmp}  │  "
-                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  │  [dim]/ menu · esc stop · ^Q keluar[/]")
+            clock = f"  |  t sesi {up//60}m{up%60:02d}s"
+        cmp = f"  |  [magenta]compactx{self.compacts}[/]" if self.compacts else ""
+        return (f"{dot} [b]{act}[/]  |  {self._ctxbar()}  |  {tok} tok{clock}  |  giliran {self.turns}{cmp}  |  "
+                f"aktif {'[green]ON[/]' if self.allow_gated else '[red]OFF[/]'}  |  [dim]/ menu - esc stop - ^Q keluar[/]")
     @work(thread=True)
     def _load_window(self):
         try:  # override manual menang (llm_context di Settings; 0 = auto)
@@ -1055,21 +1054,21 @@ class LlmChatScreen(ModalScreen):
     def _tick(self):
         self._refresh_bars()
         try:
-            wrap = self.query_one("#thinkwrap"); pb = self.query_one("#thinking", ProgressBar)
-            lbl = self.query_one("#thinklbl", Static)
+            wrap = self.query_one("#thinkwrap")
+            lbl = self.query_one("#thinklbl", Static); bar = self.query_one("#thinkbar", Static)
         except Exception: return
         if self.busy:
             self._tk += 1
-            pb.update(total=None)   # bar indeterminate (animasi jalan sendiri)
             kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
             word = self.THINK_WORD[(self._tk // 2) % len(self.THINK_WORD)]
-            lbl.update(f"[yellow]{kao}[/] [dim italic]{word}[/]")   # kaomoji + kata + (bar di sebelah)
+            lbl.update(f"[yellow]{kao}[/] [dim italic]{word}[/]")   # kaomoji + kata + bar di sebelah
+            # bar berjalan, ASCII murni (lebar pasti 1 sel/karakter di semua terminal)
+            n, blk, pos = 14, 3, self._tk % 14
+            cells = "".join("#" if any((pos + i) % n == j for i in range(blk)) else "-" for j in range(n))
+            bar.update(f"[[{cells}]]")   # [[ ]] = kurung literal di markup Rich
             wrap.add_class("on")
         else:
-            # PENTING: total=100 (determinate) menghentikan animasi indeterminate ProgressBar.
-            # Kalau dibiarkan total=None, bar animasi jalan TERUS walau tersembunyi -> repaint
-            # tiap frame -> tearing/frame-dobel di terminal lambat. Diamkan saat idle.
-            if pb.total is None: pb.update(total=100, progress=0)
+            bar.update("")              # bar diam total saat idle: tak ada animasi/repaint
             wrap.remove_class("on")
     def on_mount(self):
         log = self.query_one("#chatlog", SelectableLog)
@@ -1081,9 +1080,9 @@ class LlmChatScreen(ModalScreen):
         with log.batch():   # SATU update+scroll utk seluruh intro (bukan ~30x)
             # --- banner + identitas harness ---
             log.write(AGENT_BANNER)
-            log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  ·  {AGENT_TAGLINE}")
-            log.write(f"[dim]model:[/] [b]{model}[/] · [dim]provider:[/] {prov}   [dim]session:[/] {self.sid}")
-            log.write("[dim]" + "─" * 70 + "[/]")
+            log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION}  -  {AGENT_TAGLINE}")
+            log.write(f"[dim]model:[/] [b]{model}[/] - [dim]provider:[/] {prov}   [dim]session:[/] {self.sid}")
+            log.write("[dim]" + "-" * 70 + "[/]")
             # --- tools (real, dari registry) ---
             names = [t["name"] for t in la.TOOLS]
             log.write("[b yellow]Tools[/]")
@@ -1091,22 +1090,22 @@ class LlmChatScreen(ModalScreen):
                 have = [k for k in keys if k in names]
                 if have: log.write(f"  [dim]{grp}:[/] " + ", ".join(have))
             # --- skills (real, dari SKILLS) + ext-tools ---
-            log.write("[b yellow]Skills[/] [dim](playbook framework — load_skill)[/]")
+            log.write("[b yellow]Skills[/] [dim](playbook framework -- load_skill)[/]")
             log.write("  " + ", ".join(la.SKILLS.keys()))
             nx = len(self.cfg.get("external_tools", {}))
-            log.write(f"[b yellow]Ext-tools[/] [dim](nuclei/burp/sqlmap/dll — run_ext_tool)[/]  {nx} terdaftar")
+            log.write(f"[b yellow]Ext-tools[/] [dim](nuclei/burp/sqlmap/dll -- run_ext_tool)[/]  {nx} terdaftar")
             # --- ringkasan hitungan real ---
-            log.write("[dim]" + "─" * 70 + "[/]")
-            log.write(f"[b]{len(names)} tools[/] · [b]{len(la.SKILLS)} skills[/] · [b]{nx} ext-tools[/] · ketik [yellow]/help[/] utk perintah")
+            log.write("[dim]" + "-" * 70 + "[/]")
+            log.write(f"[b]{len(names)} tools[/] - [b]{len(la.SKILLS)} skills[/] - [b]{nx} ext-tools[/] - ketik [yellow]/help[/] utk perintah")
             # --- status memori & sesi ---
             try:
                 mi = la.mem_list()
                 if mi and "kosong" not in mi: log.write(f"[dim]🧠 memori jangka panjang: {mi.count(chr(10))} entri (recall lintas sesi).[/]")
             except Exception: pass
             # --- alur & welcome ---
-            log.write("\n[cyan]Alur bertahap:[/] pilih target → recon → analisa/hipotesis → rencana → verifikasi → draf laporan → [b]submit=kamu[/]")
-            log.write("[cyan]✦ Tip:[/] tiap tahap berhenti di CHECKPOINT — ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
-            if not key: log.write("\n[red]⚠ belum ada API key.[/] Settings (s) → blok LLM AGENT, atau `bb.py llm --setup`.")
+            log.write("\n[cyan]Alur bertahap:[/] pilih target -> recon -> analisa/hipotesis -> rencana -> verifikasi -> draf laporan -> [b]submit=kamu[/]")
+            log.write("[cyan]* Tip:[/] tiap tahap berhenti di CHECKPOINT -- ketik [b]'lanjut'[/]. Aksi aktif (traffic) perlu [b]/yolo[/] ON.")
+            if not key: log.write("\n[red]! belum ada API key.[/] Settings (s) -> blok LLM AGENT, atau `bb.py llm --setup`.")
             # --- TARGET terpilih: suntik konteks scope resmi (skema ekstraksi) ---
             inp = self.query_one("#chatinput", Input)
             if self.target and key:
@@ -1116,18 +1115,18 @@ class LlmChatScreen(ModalScreen):
                 g = classify_assets(self.target.get("scope", []))
                 present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
                 log.write(f"\n[b green]🎯 TARGET:[/] [b]{self.target.get('name')}[/] [{self.target.get('platform')}]  "
-                          f"· aset: {', '.join(present) or '-'}  · wildcard: {len(self.target.get('wild',[]))}  · sev: {self.target.get('maxsev','-')}")
+                          f"- aset: {', '.join(present) or '-'}  - wildcard: {len(self.target.get('wild',[]))}  - sev: {self.target.get('maxsev','-')}")
                 log.write("[dim]💬 sesi chat BARU & bersih untuk target ini. Scope resmi sudah dimuat ke konteks.[/]")
                 prev = la.session_load(self.sess_key)
-                if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) — ketik [b]/resume[/] untuk lanjutkan.[/]")
-                log.write("\n[b yellow]⏸ AGENT BELUM JALAN — menunggu perintahmu.[/]")
+                if prev: log.write(f"[green]💾 ada sesi tersimpan untuk target ini ({len(prev)} pesan) -- ketik [b]/resume[/] untuk lanjutkan.[/]")
+                log.write("\n[b yellow]= AGENT BELUM JALAN -- menunggu perintahmu.[/]")
                 log.write("[dim]Tekan Enter/Kirim untuk pakai goal saran ini, atau ketik goal-mu sendiri:[/]")
-                log.write(f"[dim]  saran: “mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF”[/]")
+                log.write(f"[dim]  saran: \"mulai hunting {self.target.get('name')}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
                 self._suggest = f"mulai hunting {self.target.get('name')}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset."
-            log.write("\n[dim]➤ Kirim/Enter=mulai · ⏹/esc=stop · Ctrl+Q atau /quit=keluar · q di layar utama=tutup[/]")
-            log.write("[dim]📋 salin: pilih teks (mouse) → Ctrl+C · tempel Ctrl+Shift+V · 🔗 URL: Ctrl+Click[/]")
+            log.write("\n[dim]> Kirim/Enter=mulai - #/esc=stop - Ctrl+Q atau /quit=keluar - q di layar utama=tutup[/]")
+            log.write("[dim]📋 salin: pilih teks (mouse) -> Ctrl+C - tempel Ctrl+Shift+V - 🔗 URL: Ctrl+Click[/]")
         if self.cfg.get("mcp_servers"):
-            log.write("[dim]🔌 menghubungkan server MCP…[/]"); self._mcp_connect()
+            log.write("[dim]🔌 menghubungkan server MCP...[/]"); self._mcp_connect()
         inp.focus()
     # ---- actions ----
     def on_button_pressed(self, ev):
@@ -1145,7 +1144,7 @@ class LlmChatScreen(ModalScreen):
             if self._worker is not None: self._worker.cancel()
         except Exception: pass
         self.busy = False; self.activity = "idle"; self._refresh_bars()
-        log.write("[yellow]⏹ dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
+        log.write("[yellow]# dihentikan. (request yg sudah terlanjur terkirim bisa selesai di belakang, hasilnya diabaikan)[/]")
     def action_soft_escape(self):
         # esc TIDAK langsung keluar: kalau sibuk -> stop; kalau tidak -> ingatkan cara keluar
         if self.busy: self.action_stop()
@@ -1164,7 +1163,7 @@ class LlmChatScreen(ModalScreen):
     # ---- actions ----
     def action_toggle_active(self):
         self.allow_gated = not self.allow_gated; self._refresh_bars()
-        self.query_one("#chatlog", SelectableLog).write(f"[b]{'🟢 YOLO ON — aksi kirim-traffic diizinkan' if self.allow_gated else '🔴 YOLO OFF — aksi aktif ditolak'}[/]")
+        self.query_one("#chatlog", SelectableLog).write(f"[b]{'🟢 YOLO ON -- aksi kirim-traffic diizinkan' if self.allow_gated else '🔴 YOLO OFF -- aksi aktif ditolak'}[/]")
     def action_pick_model(self):
         def picked(mdl): self._refresh_bars(); self._load_window()   # window ikut model baru
         self.app.push_screen(ModelPickerScreen(self.cfg, picked))
@@ -1174,10 +1173,10 @@ class LlmChatScreen(ModalScreen):
         msgs = _llm_mod().session_load(self.sess_key); log = self.query_one("#chatlog", SelectableLog)
         if not msgs: log.write("[yellow]tak ada sesi tersimpan.[/]"); return
         self.messages = msgs
-        log.write("\n[dim]" + "─" * 60 + "[/]")
-        log.write(f"[b green]💾 SESI DILANJUTKAN[/] ({len(msgs)} pesan) — riwayat di bawah, tinggal terus ketik:")
+        log.write("\n[dim]" + "-" * 60 + "[/]")
+        log.write(f"[b green]💾 SESI DILANJUTKAN[/] ({len(msgs)} pesan) -- riwayat di bawah, tinggal terus ketik:")
         self._render_history(msgs)
-        log.write("[dim]" + "─" * 60 + "[/]")
+        log.write("[dim]" + "-" * 60 + "[/]")
     def _render_history(self, msgs):
         from rich.markup import escape
         log = self.query_one("#chatlog", SelectableLog)
@@ -1185,7 +1184,7 @@ class LlmChatScreen(ModalScreen):
             role = msg.get("role"); c = msg.get("content")
             if role == "user" and isinstance(c, str):
                 if c.startswith("[TARGET CONTEXT]") or c.startswith("[ARTEFAK"):
-                    log.write("[dim]  · (konteks target dimuat)[/]"); continue
+                    log.write("[dim]  - (konteks target dimuat)[/]"); continue
                 self._write_user(c[:1500])
             elif role == "assistant":
                 text = ""
@@ -1199,14 +1198,14 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", SelectableLog)
         parts = raw[1:].split(None, 1); cmd = parts[0].lower(); arg = parts[1].strip() if len(parts) > 1 else ""
         if cmd in ("help", "?", "h"):
-            log.write("[b cyan]Perintah slash:[/]"); [log.write(f"  [yellow]{c}[/] — {d}") for c, d in SLASH_HELP]
+            log.write("[b cyan]Perintah slash:[/]"); [log.write(f"  [yellow]{c}[/] -- {d}") for c, d in SLASH_HELP]
         elif cmd in ("yolo", "active", "a"): self.action_toggle_active()
         elif cmd == "model":
-            if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); self._load_window(); log.write(f"[green]model → {arg} (memuat context window…)[/]")
+            if arg: self.cfg["llm_model"] = arg; save_cfg(self.cfg); self._refresh_bars(); self._load_window(); log.write(f"[green]model -> {arg} (memuat context window...)[/]")
             else: self.action_pick_model()
         elif cmd == "provider":
             if arg in ("anthropic", "openai"):
-                self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider → {arg}[/]")
+                self.cfg["llm_provider"] = arg; save_cfg(self.cfg); self._refresh_bars(); log.write(f"[green]provider -> {arg}[/]")
             else:
                 log.write(f"[yellow]provider sekarang: {self.cfg.get('llm_provider','anthropic')}. Pakai: /provider anthropic | openai[/]")
         elif cmd in ("new", "reset"):
@@ -1214,9 +1213,9 @@ class LlmChatScreen(ModalScreen):
             if self.target:   # sesi baru tetap bawa scope target
                 self.messages = _llm_mod().new_messages(_llm_creds(self.cfg)[0] == "anthropic")
                 self.messages.append({"role": "user", "content": program_context(self.target)})
-                log.write(f"[b]— sesi baru untuk {self.target.get('name')} —[/] [dim](scope target dimuat ulang; memori tetap)[/]")
+                log.write(f"[b]-- sesi baru untuk {self.target.get('name')} --[/] [dim](scope target dimuat ulang; memori tetap)[/]")
             else:
-                log.write("[b]— sesi baru —[/] [dim](memori jangka panjang tetap)[/]")
+                log.write("[b]-- sesi baru --[/] [dim](memori jangka panjang tetap)[/]")
         elif cmd == "clear": self.action_clear()
         elif cmd == "resume": self.action_resume()
         elif cmd == "save":
@@ -1230,7 +1229,7 @@ class LlmChatScreen(ModalScreen):
             self._ingest_path(arg)
         elif cmd == "mcp":
             if arg.lower().startswith("connect"):
-                log.write("[cyan]⟳ connect server MCP…[/]"); self._mcp_connect()
+                log.write("[cyan]~ connect server MCP...[/]"); self._mcp_connect()
             else:
                 log.write("[b cyan]MCP:[/]\n" + _llm_mod().mcp_status())
         elif cmd == "skills": log.write("[b cyan]skills:[/]\n" + _llm_mod().t_list_skills())
@@ -1244,27 +1243,27 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "status":
             p, mdl, _b, k = _llm_creds(self.cfg)
             log.write(f"[b]status:[/] model={mdl} provider={p} key={'ada' if k else 'BELUM'} yolo={'ON' if self.allow_gated else 'off'} "
-                      f"giliran={self.turns} token_in/out={self.tok_in}/{self.tok_out} ctx={self.ctx}/{self.window} compact×{self.compacts} sibuk={self.busy}")
+                      f"giliran={self.turns} token_in/out={self.tok_in}/{self.tok_out} ctx={self.ctx}/{self.window} compactx{self.compacts} sibuk={self.busy}")
         elif cmd == "context":
             win = self.window or _llm_mod().model_window(_llm_creds(self.cfg)[1])
             est = _llm_mod().estimate_ctx(self.messages) if self.messages else 0
-            log.write(f"[b]konteks:[/] terpakai≈{self.ctx or est} tok / window {win} tok ({int((self.ctx or est)*100/win)}%). Auto-compact di ~75%.")
+            log.write(f"[b]konteks:[/] terpakai~{self.ctx or est} tok / window {win} tok ({int((self.ctx or est)*100/win)}%). Auto-compact di ~75%.")
         elif cmd == "compact":
             if not self.messages or len(self.messages) < 3: log.write("[yellow]konteks masih pendek.[/]"); return
             p, mdl, base, k = _llm_creds(self.cfg)
-            log.write("[magenta]⟳ meringkas konteks…[/]"); self._do_compact(p, mdl, base, k)
+            log.write("[magenta]~ meringkas konteks...[/]"); self._do_compact(p, mdl, base, k)
         elif cmd == "stage": self._submit("lanjut ke tahap berikutnya sesuai urutan; kalau tahap sekarang belum kelar, selesaikan lalu checkpoint.")
         elif cmd == "stop": self.action_stop()
         elif cmd in ("quit", "exit", "q", "keluar"):
             if self.busy: self.action_stop()
-            log.write("[dim]keluar sesi chat…[/]"); self.app.pop_screen()
+            log.write("[dim]keluar sesi chat...[/]"); self.app.pop_screen()
         else: log.write(f"[yellow]perintah '/{cmd}' tak dikenal. /help utk daftar.[/]")
     @work(thread=True)
     def _mcp_connect(self):
         log = self.query_one("#chatlog", SelectableLog)
         try:
             rep = _llm_mod().mcp_connect_all(self.cfg)
-            for line in rep: self.app.call_from_thread(log.write, "  [dim]MCP • " + line + "[/]")
+            for line in rep: self.app.call_from_thread(log.write, "  [dim]MCP * " + line + "[/]")
             if not rep: self.app.call_from_thread(log.write, "[dim]tak ada server MCP di config.[/]")
         except Exception as e:
             self.app.call_from_thread(log.write, f"[red]MCP gagal: {e}[/]")
@@ -1299,7 +1298,7 @@ class LlmChatScreen(ModalScreen):
                 if q in cmd[1:].lower(): name_hits.append((c, d, cmd))   # match NAMA command dulu
                 elif q in d.lower(): desc_hits.append((c, d, cmd))       # baru deskripsi
             for c, d, cmd in name_hits + desc_hits:
-                box.add_option(Option(f"{c}  —  {d}", id=cmd))
+                box.add_option(Option(f"{c}  --  {d}", id=cmd))
             if box.option_count:
                 box.add_class("on"); box.highlighted = 0
             else:
@@ -1329,9 +1328,9 @@ class LlmChatScreen(ModalScreen):
         if box and box.has_class("on"):   # palette aktif
             val = ev.value.strip(); tok = val.split()[0].lower() if val else ""
             known = {c.split()[0] for c, _d in SLASH_HELP}
-            if tok in known:                       # yg diketik PERSIS sebuah command → jalankan itu (+ argnya)
+            if tok in known:                       # yg diketik PERSIS sebuah command -> jalankan itu (+ argnya)
                 ev.input.value = ""; box.remove_class("on"); self._slash(val); return
-            self._fill_slash(run=True); return     # cuma prefix → jalankan yg ter-highlight (arrow utk pilih)
+            self._fill_slash(run=True); return     # cuma prefix -> jalankan yg ter-highlight (arrow utk pilih)
         text = ev.value.strip(); ev.input.value = ""
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
@@ -1339,8 +1338,8 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", SelectableLog)
         if text.startswith("/"): self._slash(text); return          # slash SELALU jalan (walau sibuk)
         if self.busy:
-            log.write("[yellow]⏳ agent masih memproses — tunggu CHECKPOINT, atau tekan ⏹/esc untuk stop.[/]"); return
-        cand = text.strip().strip('"').strip("'")                   # drag-drop path → ingest
+            log.write("[yellow]⏳ agent masih memproses -- tunggu CHECKPOINT, atau tekan #/esc untuk stop.[/]"); return
+        cand = text.strip().strip('"').strip("'")                   # drag-drop path -> ingest
         if (os.sep in cand or cand.startswith("~")) and os.path.exists(os.path.expanduser(cand)):
             log.write(f"\n[b green]📎 upload[/] {cand}"); self._ingest_path(cand); return
         self._write_user(text)
@@ -1355,9 +1354,9 @@ class LlmChatScreen(ModalScreen):
     def _write_user(self, text):
         from rich.markup import escape
         # kotak hijau via garis, satu markup string (biar bisa diseleksi)
-        body = "\n".join("[green]│[/] " + escape(l) for l in text.splitlines())
+        body = "\n".join("[green]|[/] " + escape(l) for l in text.splitlines())
         self.query_one("#chatlog", SelectableLog).write(
-            f"\n[b green]▶ kamu[/]\n{body or '[green]│[/]'}")
+            f"\n[b green]> kamu[/]\n{body or '[green]|[/]'}")
     def _table_text(self, rows):
         from rich.markup import escape
         cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
@@ -1365,9 +1364,9 @@ class LlmChatScreen(ModalScreen):
         w = [len(h) for h in hdr]
         for row in data:
             for i, c in enumerate(row): w[i] = max(w[i], len(c))
-        line = lambda cs: " │ ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
+        line = lambda cs: " | ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
         out = ["  [b]" + escape(line(hdr)) + "[/]",
-               "  [dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
+               "  [dim]" + escape("-+-".join("-" * x for x in w)) + "[/]"]
         out += ["  " + escape(line(r)) for r in data]
         return "\n".join(out)
     def _write_agent(self, body):
@@ -1398,7 +1397,7 @@ class LlmChatScreen(ModalScreen):
         before = la.estimate_ctx(self.messages)
         self.messages[:] = la.compact(self.messages, prov, model, key, base)
         self.ctx = la.estimate_ctx(self.messages); self.compacts += 1
-        self.app.call_from_thread(log.write, f"[magenta]✔ konteks diringkas: ~{before} → ~{self.ctx} tok.[/]")
+        self.app.call_from_thread(log.write, f"[magenta]v konteks diringkas: ~{before} -> ~{self.ctx} tok.[/]")
         self.app.call_from_thread(self._refresh_bars)
     @work(thread=True)
     def _run_stage(self, text, prov, model, base, key):
@@ -1417,16 +1416,16 @@ class LlmChatScreen(ModalScreen):
             elif kind == "tool":
                 nm = body.split(" ", 1)[0]; arg = body.split(" ", 1)[1] if " " in body else ""
                 from rich.markup import escape as _e
-                w(f"  [yellow]⚙[/] [b]{nm}[/] [dim]{_e(arg[:120])}[/]")
+                w(f"  [yellow]*[/] [b]{nm}[/] [dim]{_e(arg[:120])}[/]")
             elif kind == "result":
                 from rich.markup import escape as _e
                 lines = [l for l in body.splitlines() if l.strip()]
                 head = _e(lines[0].lstrip("#").strip()[:130]) if lines else "(kosong)"
-                more = f" [dim]… +{len(lines)-1} baris (dipakai agent, tak ditampilkan penuh)[/]" if len(lines) > 1 else ""
-                w(f"  [dim]▸[/] {head}{more}")
+                more = f" [dim]... +{len(lines)-1} baris (dipakai agent, tak ditampilkan penuh)[/]" if len(lines) > 1 else ""
+                w(f"  [dim]>[/] {head}{more}")
             else:
                 from rich.markup import escape as _e
-                w(f"[red]⚠ {_e(body)}[/]")
+                w(f"[red]! {_e(body)}[/]")
         try:
             la = _llm_mod()
             if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
@@ -1434,7 +1433,7 @@ class LlmChatScreen(ModalScreen):
             la.agent_turn(self.messages, prov, model, key, base, emit, allow_gated=self.allow_gated, confirm=None, on_meta=set_meta)
             la.session_save(self.sess_key, self.messages)
         except Exception as e:
-            w(f"[red]⚠ error: {e}[/]")
+            w(f"[red]! error: {e}[/]")
         finally:
             self.busy = False; self.activity = "idle"; self._worker = None
             self.app.call_from_thread(self._refresh_bars)
@@ -1445,12 +1444,12 @@ class SchedulerScreen(ModalScreen):
     BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+s", "install", "install"), ("ctrl+d", "remove", "hapus")]
     def compose(self) -> ComposeResult:
         with Vertical(id="stat"):
-            yield Label("[b cyan]SCHEDULING — pipeline otomatis harian (cron)[/]", classes="title")
+            yield Label("[b cyan]SCHEDULING -- pipeline otomatis harian (cron)[/]", classes="title")
             yield Static(self._status(), id="cronstat")
-            yield Static("Pipeline = finder → program baru → scope.md + dedup + recon pasif → notif. (butuh cron/Linux)")
+            yield Static("Pipeline = finder -> program baru -> scope.md + dedup + recon pasif -> notif. (butuh cron/Linux)")
             yield Label("Jam (0-23), lalu tekan [b green]Ctrl+S[/] = pasang/update:")
             yield Input(value="8", id="cronhour")
-            yield Label("\n[b green]▶ Ctrl+S[/] pasang jadwal · [b red]Ctrl+D[/] hapus jadwal · [dim]esc = tutup[/]")
+            yield Label("\n[b green]> Ctrl+S[/] pasang jadwal - [b red]Ctrl+D[/] hapus jadwal - [dim]esc = tutup[/]")
     def _status(self):
         return "Status: [green]TERJADWAL AKTIF[/]" if cron_active() else "Status: [yellow]belum terjadwal[/]"
     def on_input_submitted(self, _): self.action_install()
@@ -1464,8 +1463,8 @@ class SchedulerScreen(ModalScreen):
 
 class BBTUI(App):
     CSS = CSS
-    ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy — tanpa Shift/slash
-    TITLE = "FAJAR-AGENT — Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
+    ALLOW_SELECT = True   # seleksi teks pakai mouse (drag) + Ctrl+C copy -- tanpa Shift/slash
+    TITLE = "FAJAR-AGENT -- Bug Bounty Hunting Harness"   # command palette (ctrl+p / ikon header) AKTIF: ganti tema, dll
     BINDINGS = [Binding("ctrl+c", "copy_text", "salin", key_display="Ctrl+C", show=True), ("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
@@ -1473,22 +1472,22 @@ class BBTUI(App):
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"), ("escape", "clear_search", "")]
     def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
     def compose(self) -> ComposeResult:
-        yield Header(show_clock=True)
+        yield Header(show_clock=True, icon="*")
         with Horizontal(id="body"):
             with Vertical(id="side"):
                 yield Static("memuat...", id="stat")
                 yield Static("[b]Filter platform[/b]\n[dim]ketik / untuk cari nama/scope[/]", classes="title")
             with Vertical(id="tablewrap"):
                 yield DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
-            yield VerticalScroll(Static("pilih program →", id="detail"))
+            yield VerticalScroll(Static("pilih program ->", id="detail"))
         yield Input(placeholder="cari nama/scope... (enter)", id="search")
-        yield Footer()
+        yield Footer(show_command_palette=False)
     def on_mount(self):
         t = self.query_one("#tbl", DataTable)
         t.add_columns("Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
         self.query_one("#tablewrap").border_title = "PROGRAMS"
-        self.query_one("#detail").border_title = "DETAIL / SCOPE"
+        self.query_one("#detail").border_title = "DETAIL"
         self.load()
         self.set_focus(t)   # penting: fokus ke tabel, bukan ke kotak search
         self.push_screen(SplashScreen())   # banner pembuka (sekalian nutup loading)
@@ -1553,14 +1552,14 @@ class BBTUI(App):
         md = (f"[b cyan]{pr['name']}[/] [{pr['platform']}]"
               + ("  [green]🆕 BARU[/]" if pr["key"] in self.new_keys else "") + "\n"
               f"Reward: [b]{reward(pr)}[/]  MaxSev: {pr['maxsev']}  Q(anti-ramai): [b]{self._q(pr)}[/]/100\n"
-              f"Program: {mgd}  ·  Aset: {len(pr['scope'])}  ·  Wildcard: {len(pr['wild'])}\n"
+              f"Program: {mgd}  -  Aset: {len(pr['scope'])}  -  Wildcard: {len(pr['wild'])}\n"
               f"Sinyal H1: [dim]{pr.get('signal','-')}[/]\n"
               f"URL (rules): {pr['url'] or '-'}\n\n"
               f"[b]Wildcard ({len(pr['wild'])}):[/]\n" + ("\n".join('  ' + w for w in pr['wild']) or '  -') +
               f"\n\n[b]Aset in-scope ({len(others)}):[/]\n" + ("\n".join('  ' + s for s in others[:40]) or '  -') +
-              (f"\n  … +{len(others)-40} lagi" if len(others) > 40 else "") +
-              "\n\n[b]AKSI:[/] [yellow]e[/]=recon(extract web) · [yellow]m[/]=monitor subdomain · [yellow]d[/]=dedup"
-              "\n[dim]target terisi dari sini, tapi bisa diedit/ketik manual · ?=bantuan[/]")
+              (f"\n  ... +{len(others)-40} lagi" if len(others) > 40 else "") +
+              "\n\n[b]AKSI:[/] [yellow]e[/]=recon(extract web) - [yellow]m[/]=monitor subdomain - [yellow]d[/]=dedup"
+              "\n[dim]target terisi dari sini, tapi bisa diedit/ketik manual - ?=bantuan[/]")
         self.query_one("#detail", Static).update(md)
     def _selected(self):
         t = self.query_one("#tbl", DataTable)
@@ -1576,7 +1575,7 @@ class BBTUI(App):
         self.cfg["sort"] = order[(order.index(cur) + 1) % len(order)] if cur in order else "quiet"
         save_cfg(self.cfg); self.notify(f"urut: {self.cfg['sort']}"); self._render()
     def action_copy_text(self):
-        # salin teks yg dipilih (drag mouse) ke clipboard — Ctrl+C (bawaan Textual: Screen.copy_text)
+        # salin teks yg dipilih (drag mouse) ke clipboard -- Ctrl+C (bawaan Textual: Screen.copy_text)
         try: self.screen.action_copy_text()
         except Exception:
             try: self.copy_to_clipboard(self.screen.get_selected_text() or "")
@@ -1585,7 +1584,7 @@ class BBTUI(App):
     def action_external(self):
         pr = self._selected(); self.push_screen(ExternalToolsScreen(self.cfg, apex(pr) if pr else ""))
     def action_pipeline(self):
-        self.push_screen(RunScreen([sys.executable, _tool("pipeline.py")], "Pipeline (finder→dedup→recon)"))
+        self.push_screen(RunScreen([sys.executable, _tool("pipeline.py")], "Pipeline (finder->dedup->recon)"))
     def action_schedule(self):
         self.push_screen(SchedulerScreen())
     def action_llm(self):
@@ -1607,7 +1606,7 @@ class BBTUI(App):
         txt = (f"🎯 {pr['name']} [{pr['platform']}]\nReward: {reward(pr)}  Sev: {pr['maxsev']}\n"
                f"Wildcard: {', '.join(pr['wild'][:8]) or '-'}\nURL: {pr['url'] or '-'}")
         res = notify_channels(txt, self.cfg)
-        self.app.call_from_thread(self.notify, " · ".join(res))
+        self.app.call_from_thread(self.notify, " - ".join(res))
     def action_workspace(self):
         pr = self._selected()
         if not pr: self.notify("pilih program dulu"); return
@@ -1620,7 +1619,7 @@ class BBTUI(App):
                 if tpl: shutil.copytree(tpl, dest)
                 else: os.makedirs(dest, exist_ok=True)
             with open(os.path.join(dest, "scope.md"), "a", encoding="utf-8") as fh:
-                fh.write(f"\n\n## Auto-seed (bbtui) — {pr['name']} [{pr['platform']}] {pr['url']}\n"
+                fh.write(f"\n\n## Auto-seed (bbtui) -- {pr['name']} [{pr['platform']}] {pr['url']}\n"
                          "### Wildcard\n" + "\n".join("- " + w for w in pr["wild"]) +
                          "\n### Scope\n" + "\n".join("- " + s for s in pr["scope"][:80]))
             self.notify(f"workspace dibuat: {dest}")
