@@ -1050,8 +1050,10 @@ class LlmChatScreen(ModalScreen):
             yield Static(self._statusline(), id="chatstatus")
             yield OptionList(id="slashbox")
             with Horizontal(id="chatbar"):
-                yield Button("⏹", id="btnstop", variant="error")
-                yield ChatBox(placeholder=("ketik goal atau /  --  Enter kirim, Alt+Enter baris baru" if key else "set API key dulu (Settings s)"), id="chatinput")
+                # variant diatur di _tick: merah HANYA saat sibuk. Warna harus menandakan
+                # keadaan, bukan jadi hiasan -- tombol idle jangan paling mencolok di layar.
+                yield Button("⏹", id="btnstop", variant="default")
+                yield ChatBox(placeholder=("ketik goal, atau / untuk menu" if key else "set API key dulu (Settings s)"), id="chatinput")
                 yield Button("➤ Kirim", id="btnsend", variant="success")
     def _headerline(self):
         prov, model, _b, _k = _llm_creds(self.cfg)
@@ -1107,6 +1109,11 @@ class LlmChatScreen(ModalScreen):
             wrap = self.query_one("#thinkwrap")
             lbl = self.query_one("#thinklbl", Static); bar = self.query_one("#thinkbar", Static)
         except Exception: return
+        try:   # tombol stop: merah saat sibuk, redup saat idle
+            btn = self.query_one("#btnstop", Button)
+            want = "error" if self.busy else "default"
+            if btn.variant != want: btn.variant = want
+        except Exception: pass
         if self.busy:
             self._tk += 1
             kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
@@ -1139,7 +1146,8 @@ class LlmChatScreen(ModalScreen):
                 nmem = 0
             log.write(AGENT_BANNER)
             log.write(f"[b]{AGENT_NAME}[/] v{AGENT_VERSION} [dim]·[/] {AGENT_TAGLINE}")
-            log.write(f"[dim]{model} · {prov} · {len(names)} tools · {len(la.SKILLS)} skills · {nx} ext-tools"
+            # model/provider TIDAK diulang di sini: sudah permanen di header bar.
+            log.write(f"[dim]{len(names)} tools · {len(la.SKILLS)} skills · {nx} ext-tools"
                       + (f" · {nmem} memori" if nmem else "") + "[/]")
             log.write("[dim]ketik[/] [yellow]/help[/] [dim]perintah & tombol[/] [dim]·[/] "
                       "[yellow]/tools[/] [yellow]/skills[/] [dim]daftar lengkap[/]")
@@ -1164,7 +1172,7 @@ class LlmChatScreen(ModalScreen):
                 self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
                                  "HUNTING BRIEF sesuai jenis aset.")
             else:
-                log.write("\n[dim]Enter kirim · / menu · Ctrl+Q keluar[/]")
+                pass   # status bar sudah menampilkan "/ menu - esc stop - ^Q keluar" terus-menerus
         if self.cfg.get("mcp_servers"):
             log.write("[dim]🔌 menghubungkan server MCP...[/]"); self._mcp_connect()
         inp.focus()
