@@ -956,6 +956,12 @@ class ChatInput(Input):
             sel = self.selection
             if sel.is_empty: self.insert_text_at_cursor(clean)
             else: self.replace(clean, *sel)
+        # GHOST-FIX: highlight seleksi chat (yg dibuat utk copy) sering nyangkut saat paste →
+        # status/kotak tergambar dobel. Bersihkan seleksi + paksa repaint penuh sekali.
+        try: self.screen.clear_selection()
+        except Exception: pass
+        try: self.app.call_after_refresh(self.app.refresh, repaint=True, layout=True)
+        except Exception: pass
 
 class LlmChatScreen(ModalScreen):
     """Chat LLM ala Hermes/OpenCode/Claude Code — status bar, slash-commands, alur BERTAHAP rapi."""
