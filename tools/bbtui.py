@@ -226,9 +226,13 @@ def _num(cfg, k):
     except Exception: return 0.0
 
 def passes(pr, cfg):
+    # PROGRAM PRIVATE (kamu diundang) = SELALU tampil. Filter anti-ramai (bounty/wildcard/
+    # managed/quiet/assets) itu utk menyaring ribuan program PUBLIK; program yg kamu punya
+    # akses khusus jangan pernah disembunyikan olehnya (dulu VDP-private dibuang oleh 'if not bounty').
+    if "PRIVATE" in str(pr.get("signal", "")): return True
     if not pr["bounty"]: return False
-    # program private (token) & disclose (VDP/independen, tak punya wildcard) = selalu tampil walau wildcard wajib
-    _relax = "PRIVATE" in str(pr.get("signal", "")) or pr.get("platform") == "disclose"
+    # disclose (VDP/independen, tak punya wildcard) = tampil walau wildcard wajib
+    _relax = pr.get("platform") == "disclose"
     if cfg["require_wildcard"] and not pr["wild"] and not _relax: return False
     if cfg["min_bounty"] and pr["bounty_max"] is not None and pr["bounty_max"] < cfg["min_bounty"]: return False
     af = [x for x in str(cfg.get("asset_type", "")).lower().replace(" ", "").split(",") if x]
@@ -394,24 +398,33 @@ def fetch_h1_private(cfg, have_keys, cap=60):
     """Tarik program yg BISA KAMU AKSES dari akun H1 (termasuk PRIVATE) via API resmi. Butuh h1_api_user+token."""
     hdr = _h1_auth_hdr(cfg)
     if not hdr: return {}, None
-    out = {}; url = "https://api.hackerone.com/v1/hackers/programs?page%5Bsize%5D=100"
+    url = "https://api.hackerone.com/v1/hackers/programs?page%5Bsize%5D=100"
     try:
+        # 1) kumpulkan handle (murah) dari halaman list
+        handles = []
         for _pg in range(8):
             d = json.loads(_get(url, headers=hdr, timeout=45))
             for it in d.get("data", []):
                 h = (it.get("attributes", {}) or {}).get("handle")
-                if not h: continue
-                key = f"h1|{h}"
-                if key in have_keys or key in out: continue   # sudah ada dari data publik -> yg tersisa = private/baru
-                pr = _h1_detail(h, hdr)
-                if pr: out[key] = pr
-                if len(out) >= cap: return out, None
+                if h and f"h1|{h}" not in have_keys and h not in handles:
+                    handles.append(h)
+            if len(handles) >= cap: break
             nxt = (d.get("links") or {}).get("next")
             if not nxt: break
             url = nxt
+        handles = handles[:cap]
+        # 2) ambil detail PARALEL (dulu berurutan -> 60 request satu-satu = lambat)
+        out = {pr["key"]: pr for pr in _parallel_detail(handles, lambda h: _h1_detail(h, hdr)) if pr}
         return out, None
     except Exception as e:
-        return out, f"h1-api: {e}"
+        return out if 'out' in dir() else {}, f"h1-api: {e}"
+
+def _parallel_detail(items, fn, workers=10):
+    """Jalankan fn(item) untuk banyak item secara paralel (I/O-bound: aman & jauh lebih cepat)."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not items: return []
+    with ThreadPoolExecutor(max_workers=min(workers, len(items))) as ex:
+        return list(ex.map(fn, items))
 
 def _bearer(tok):
     return {"Authorization": "Bearer " + tok, "Accept": "application/json"} if tok else None
@@ -436,18 +449,21 @@ def fetch_intigriti_private(cfg, have_keys, cap=50):
     try:
         d = json.loads(_get("https://api.intigriti.com/external/researcher/v1/programs?limit=500", headers=hdr, timeout=45))
         items = d if isinstance(d, list) else (d.get("records") or d.get("data") or d.get("items") or [])
+        cand = []
         for it in items:
             handle = it.get("handle") or it.get("id") or it.get("programId") or it.get("name")
-            if not handle: continue
-            key = f"it|{handle}"
-            if key in have_keys or key in out: continue
+            if not handle or f"it|{handle}" in have_keys: continue
+            cand.append((handle, it))
+            if len(cand) >= cap: break
+        def _build(pair):
+            handle, it = pair
             scope, wild = _intigriti_detail(handle, hdr)
             url = it.get("webLink") or it.get("url") or f"https://app.intigriti.com/researcher/programs/{handle}"
-            out[key] = dict(platform="intigriti", key=key, name="🔒 " + str(it.get("name") or handle), url=url,
-                            bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", managed=None,
-                            eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (Intigriti token)",
-                            scope=scope, wild=wild)
-            if len(out) >= cap: break
+            return dict(platform="intigriti", key=f"it|{handle}", name="🔒 " + str(it.get("name") or handle), url=url,
+                        bounty=True, bounty_min=None, bounty_max=None, cur="$", maxsev="-", managed=None,
+                        eff=None, ttfr=None, ttb=None, ttr=None, signal="PRIVATE/accessible (Intigriti token)",
+                        scope=scope, wild=wild)
+        out = {pr["key"]: pr for pr in _parallel_detail(cand, _build)}
         return out, None
     except Exception as e:
         return out, f"intigriti-api: {e}"
@@ -2154,7 +2170,8 @@ class BBTUI(App):
         t = self.query_one("#tbl", DataTable); t.clear(); self.rowmap = {}
         items = list(self.progs.values())
         mq = _num(self.cfg, "min_quiet")
-        if mq: items = [p for p in items if self._q(p) >= mq]
+        # private (diundang) tak ikut disaring skor quiet
+        if mq: items = [p for p in items if self._q(p) >= mq or "PRIVATE" in str(p.get("signal", ""))]
         if self.only_new:
             items = [p for p in items if p["key"] in self.new_keys]
         if self.filter:
