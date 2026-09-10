@@ -1535,7 +1535,8 @@ class LlmChatScreen(ModalScreen):
         # sesi lama TETAP tersimpan. target_slug utk mengelompokkan & auto-lanjut sesi terakhir.
         base = "strategist" if self.strategist else ((target.get("key") or target.get("name")) if target else "general")
         self.target_slug = re.sub(r"\W", "_", str(base))[:50]
-        self.sess_id = self._new_sess_id()   # bisa ditimpa on_mount (lanjut sesi terakhir)
+        self.sess_id = self._new_sess_id()   # TETAP selama sesi -> chatting tak bikin sesi baru;
+        #                                      hanya berubah lewat /new, /resume, /pick (handoff)
     def _new_sess_id(self):
         return "tui-%s-%s%s" % (self.target_slug, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_"),
                                 base64.b16encode(os.urandom(2)).decode().lower())
