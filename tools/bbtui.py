@@ -432,17 +432,48 @@ def _parallel_detail(items, fn, workers=10):
 def _bearer(tok):
     return {"Authorization": "Bearer " + tok, "Accept": "application/json"} if tok else None
 
+_SCOPE_CONTAINER = re.compile(r"domain|target|scope|asset|endpoint", re.I)
+def _looks_scope(v):
+    if not isinstance(v, str): return False
+    v = v.strip()
+    if not v or len(v) > 200 or " " in v: return False
+    if v.startswith(("http://", "https://", "*.", "*-", "com.", "android:", "ios:")): return True
+    # domain / wildcard / IP
+    return bool(re.match(r"^\*?[\w\-\*]+(\.[\w\-\*]+)+$", v))
+def _walk_scope(obj, active=False, depth=0, out=None):
+    """Telusuri JSON, ambil SEMUA string mirip-scope di dalam wadah domain/target/asset.
+    Tahan perubahan struktur API (Intigriti sering bersarang: content.domains[].endpoint dll)."""
+    if out is None: out = []
+    if depth > 8: return out
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            a = active or bool(_SCOPE_CONTAINER.search(str(k)))
+            if a and isinstance(v, str) and _looks_scope(v):
+                out.append(v.strip())
+            else:
+                _walk_scope(v, a, depth + 1, out)
+    elif isinstance(obj, list):
+        for x in obj:
+            if active and isinstance(x, str) and _looks_scope(x): out.append(x.strip())
+            else: _walk_scope(x, active, depth + 1, out)
+    return out
 def _intigriti_detail(handle, hdr):
     try:
         d = json.loads(_get(f"https://api.intigriti.com/external/researcher/v1/programs/{handle}", headers=hdr, timeout=30))
-        doms = d.get("domains") or d.get("inScope") or d.get("scope") or []
-        ids = []
-        for x in doms:
-            v = x if isinstance(x, str) else (x.get("endpoint") or x.get("value") or x.get("url") or x.get("identifier") or "")
-            if v: ids.append(v)
-        return ids, [i for i in ids if is_wild(i)]
     except Exception:
         return [], []
+    ids = []
+    for v in _walk_scope(d):                       # dedup jaga urutan
+        if v not in ids: ids.append(v)
+    # buang URL milik intigriti sendiri (webLink program, bukan scope)
+    ids = [v for v in ids if "intigriti.com" not in v]
+    if not ids:                                    # diagnosa: simpan response mentah bila scope tetap 0
+        try:
+            if os.environ.get("FAJAR_DEBUG_SCOPE"):
+                open(os.path.expanduser(f"~/fajar-intigriti-{re.sub(chr(92)+'W','_',str(handle))[:30]}.json"),
+                     "w", encoding="utf-8").write(json.dumps(d, indent=2)[:20000])
+        except Exception: pass
+    return ids, [i for i in ids if is_wild(i)]
 
 def fetch_intigriti_private(cfg, have_keys, cap=50):
     """Program akun Intigriti (termasuk PRIVATE) + scope via Personal Access Token. EKSPERIMENTAL."""
