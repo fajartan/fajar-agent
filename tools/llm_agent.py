@@ -917,6 +917,89 @@ def build_system():
     return SYSTEM + (("\n\n== MEMORI TERSIMPAN (indeks; pakai memory_search utk isi) ==\n" + dg) if dg else "")
 
 # ---------------- provider adapters ----------------
+def _sse_payloads(text):
+    """Ambil semua payload JSON dari body SSE ('data: {...}'). Abaikan '[DONE]'/komentar."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"): continue
+        d = line[5:].strip()
+        if not d or d == "[DONE]": continue
+        try: out.append(json.loads(d))
+        except Exception: pass
+    return out
+
+def _reassemble_openai(chunks):
+    """Rakit potongan stream OpenAI (choices[].delta) jadi 1 respons utuh."""
+    content = []; tool = {}; usage = {}; finish = None
+    for ch in chunks:
+        u = ch.get("usage")
+        if isinstance(u, dict) and u: usage = u
+        for c in ch.get("choices", []) or []:
+            if c.get("finish_reason"): finish = c["finish_reason"]
+            delta = c.get("delta") or {}
+            if delta.get("content"): content.append(delta["content"])
+            for tc in delta.get("tool_calls") or []:
+                slot = tool.setdefault(tc.get("index", 0), {"id": None, "type": "function", "function": {"name": "", "arguments": ""}})
+                if tc.get("id"): slot["id"] = tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"): slot["function"]["name"] += fn["name"]
+                if fn.get("arguments"): slot["function"]["arguments"] += fn["arguments"]
+    msg = {"role": "assistant", "content": "".join(content) or None}
+    if tool: msg["tool_calls"] = [tool[k] for k in sorted(tool)]
+    return {"choices": [{"message": msg, "finish_reason": finish}], "usage": usage}
+
+def _reassemble_anthropic(events):
+    """Rakit event stream Anthropic (content_block_* / message_*) jadi 1 respons utuh."""
+    blocks = {}; usage = {"input_tokens": 0, "output_tokens": 0}; stop = None
+    for ev in events:
+        t = ev.get("type"); idx = ev.get("index", 0)
+        if t == "content_block_start":
+            blocks[idx] = dict(ev.get("content_block") or {})
+        elif t == "content_block_delta":
+            b = blocks.setdefault(idx, {}); d = ev.get("delta") or {}
+            if d.get("type") == "text_delta":
+                b["type"] = "text"; b["text"] = (b.get("text") or "") + d.get("text", "")
+            elif d.get("type") == "input_json_delta":
+                b["_partial"] = (b.get("_partial") or "") + d.get("partial_json", "")
+        elif t == "message_start":
+            u = ((ev.get("message") or {}).get("usage")) or {}
+            if u.get("input_tokens"): usage["input_tokens"] = u["input_tokens"]
+        elif t == "message_delta":
+            if (ev.get("delta") or {}).get("stop_reason"): stop = ev["delta"]["stop_reason"]
+            u = ev.get("usage") or {}
+            if u.get("output_tokens"): usage["output_tokens"] = u["output_tokens"]
+    content = []
+    for k in sorted(blocks):
+        b = blocks[k]
+        if b.get("type") == "tool_use":
+            if "_partial" in b:
+                try: b["input"] = json.loads(b.pop("_partial") or "{}")
+                except Exception: b.pop("_partial", None); b.setdefault("input", {})
+            content.append({"type": "tool_use", "id": b.get("id"), "name": b.get("name"), "input": b.get("input", {})})
+        elif b.get("type") == "text":
+            content.append({"type": "text", "text": b.get("text", "")})
+    return {"content": content, "usage": usage, "stop_reason": stop}
+
+def _loads_resilient(text):
+    """json.loads yg tahan balasan streaming (SSE) & sampah di belakang ('Extra data')."""
+    t = (text or "").strip()
+    try:
+        return json.loads(t)
+    except json.JSONDecodeError:
+        pass
+    if "data:" in t:                                   # respons streaming SSE -> rakit ulang
+        ev = _sse_payloads(t)
+        if ev:
+            if any(isinstance(e, dict) and "choices" in e for e in ev): return _reassemble_openai(ev)
+            if any(isinstance(e, dict) and str(e.get("type", "")).startswith(("content_block", "message_")) for e in ev):
+                return _reassemble_anthropic(ev)
+    try:                                               # NDJSON / objek + sampah -> ambil objek pertama
+        obj, _ = json.JSONDecoder().raw_decode(t)
+        return obj
+    except Exception:
+        raise json.JSONDecodeError("respons LLM bukan JSON valid (cuplikan: %r)" % (t[:200],), t or "", 0)
+
 def _http_json(url, headers, payload, timeout=180, retries=3):
     """POST JSON dgn retry pada error transient (429/5xx/timeout/koneksi) + backoff."""
     body = json.dumps(payload).encode()
@@ -925,7 +1008,7 @@ def _http_json(url, headers, payload, timeout=180, retries=3):
         try:
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode("utf-8", "replace"))
+                return _loads_resilient(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
             msg = e.read().decode("utf-8", "replace")[:400]; last = f"[LLM API {e.code}] {msg}"
             if e.code in (429, 500, 502, 503, 504, 529) and attempt < retries - 1:
@@ -948,7 +1031,7 @@ def chat_anthropic(messages, model, key, system=None, tools=None):
     r = _http_json("https://api.anthropic.com/v1/messages",
                    {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
                    {"model": model, "max_tokens": 3072, "system": system if system is not None else build_system(),
-                    "messages": messages, "tools": _toolschema(tools, "anthropic")})
+                    "messages": messages, "tools": _toolschema(tools, "anthropic"), "stream": False})
     text, calls = "", []
     for b in r.get("content", []):
         if b.get("type") == "text": text += b.get("text", "")
@@ -963,7 +1046,7 @@ def chat_openai(messages, model, key, base_url, system=None, tools=None):
     else: msgs = [{"role": "system", "content": sysp}] + msgs
     r = _http_json(base_url.rstrip("/") + "/chat/completions",
                    {"Authorization": "Bearer " + key, "content-type": "application/json"},
-                   {"model": model, "messages": msgs, "tools": _toolschema(tools, "openai"), "max_tokens": 3072})
+                   {"model": model, "messages": msgs, "tools": _toolschema(tools, "openai"), "max_tokens": 3072, "stream": False})
     msg = r["choices"][0]["message"]
     calls = []
     for c in (msg.get("tool_calls") or []):
@@ -1070,13 +1153,13 @@ def summarize(messages, provider, model, key, base_url):
             r = _http_json("https://api.anthropic.com/v1/messages",
                            {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
                            {"model": model, "max_tokens": 1024, "system": "Kamu peringkas konteks yg presisi.",
-                            "messages": messages + [{"role": "user", "content": ask}]})
+                            "messages": messages + [{"role": "user", "content": ask}], "stream": False})
             return "".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text")
         else:
             msgs = [x for x in messages if x.get("role") != "system"] + [{"role": "user", "content": ask}]
             r = _http_json(base_url.rstrip("/") + "/chat/completions",
                            {"Authorization": "Bearer " + key, "content-type": "application/json"},
-                           {"model": model, "messages": [{"role": "system", "content": "Kamu peringkas konteks yg presisi."}] + msgs, "max_tokens": 1024})
+                           {"model": model, "messages": [{"role": "system", "content": "Kamu peringkas konteks yg presisi."}] + msgs, "max_tokens": 1024, "stream": False})
             return r["choices"][0]["message"].get("content") or ""
     except Exception as e:
         return f"[auto-compact gagal meringkas: {e}]"
