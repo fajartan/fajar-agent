@@ -658,6 +658,8 @@ Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: round $
 #chatinput:focus { border: round $success; }
 #chatbar Button { height: 3; min-width: 8; margin: 0; }
 #reslist { height: auto; max-height: 22; border: round $primary; margin: 1 0; }
+ContextMenuScreen { align: left top; background: $background 30%; }
+#ctxlist { width: 34; height: auto; max-height: 16; border: round $accent; background: $panel; }
 #slashbox { layer: pop; dock: bottom; offset: 0 -5; width: 100%; height: auto; max-height: 12; border: round $accent; background: $panel; display: none; }
 #slashbox.on { display: block; }
 """
@@ -692,8 +694,9 @@ class HelpScreen(ModalScreen):
                 "  [yellow]b[/] view program BARU   [yellow]c[/] ganti urutan (platform->quiet->reward->assets)\n\n"
                 "[b]WORKLIST[/] (status per program, TERSIMPAN antar sesi):\n"
                 "  Kolom [b]S[/]: 🆕 baru  ·  [dim].[/] belum ditinjau  ·  👁 ditinjau  ·  🎯 dikerjakan  ·  🔕 skip\n"
-                "  [yellow]Enter[/]/[yellow]v[/] tandai 👁 ditinjau   [yellow].[/] skip 🔕 (disembunyikan; tekan . lagi utk kembalikan)\n"
-                "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto-tandai 🎯\n\n"
+                "  [yellow]v[/] 👁 ditinjau   [yellow]k[/] 🎯 dikerjakan   [yellow].[/] 🔕 skip (tekan lagi=kembalikan)   [yellow]Enter[/] buka=👁\n"
+                "  [b]KLIK KANAN[/] baris = menu pindah worklist (ditinjau/kerja/skip/belum + recon/llm)\n"
+                "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto 🎯\n\n"
                 "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
                 "  aset niche (android/ios/api) + unmanaged + program kurang 'dioptimalkan'. Makin tinggi = makin\n"
                 "  mungkin sepi/minim-duplikat. [dim]Bukan hitungan hacker asli -- itu tak ada di data gratis.[/]\n\n"
@@ -1957,6 +1960,56 @@ class LlmChatScreen(ModalScreen):
             self.app.call_from_thread(self._refresh_bars)
             self.app.call_from_thread(lambda: self.query_one("#chatinput", ChatBox).focus())
 
+class ContextMenuScreen(ModalScreen):
+    """Menu klik-kanan pada baris program: pindahkan ke worklist (ditinjau/kerja/skip/belum)
+    + aksi cepat. Muncul di posisi kursor. Status sekarang ditandai."""
+    BINDINGS = [("escape", "app.pop_screen", "tutup")]
+    ACTIONS = [
+        ("reviewed", "\U0001f441 Tandai Ditinjau"),
+        ("working",  "\U0001f3af Tandai Dikerjakan"),
+        ("skip",     "\U0001f515 Skip (sembunyikan)"),
+        ("belum",    "\u00b7 Kembalikan ke Belum"),
+        ("_sep", "\u2500\u2500\u2500\u2500\u2500"),
+        ("recon",    "\U0001f50e Recon"),
+        ("llm",      "\U0001f916 LLM Agent"),
+    ]
+    def __init__(self, pr, xy, on_action):
+        super().__init__(); self.pr = pr; self.xy = xy; self.on_action = on_action
+    def compose(self) -> ComposeResult:
+        cur = None  # status sekarang diisi oleh pemanggil via self.pr saja
+        from textual.widgets.option_list import Option
+        box = OptionList(id="ctxlist")
+        yield box
+    def on_mount(self):
+        from textual.widgets.option_list import Option
+        box = self.query_one("#ctxlist", OptionList)
+        curst = self._cur()
+        for act, label in self.ACTIONS:
+            if act == "_sep":
+                box.add_option(Option("[dim]" + label + "[/]", id="_sep", disabled=True)); continue
+            mark = "[green]\u2713[/] " if act == curst or (act == "belum" and not curst) else "  "
+            box.add_option(Option(mark + label, id=act))
+        box.highlighted = 0
+        # posisikan dekat kursor (klik), dijepit ke dalam layar
+        try:
+            x, y = self.xy
+            w, h = 34, len(self.ACTIONS) + 2
+            x = max(0, min(int(x), self.app.size.width - w))
+            y = max(0, min(int(y), self.app.size.height - h))
+            box.styles.offset = (x, y)
+        except Exception:
+            pass
+        box.focus()
+    def _cur(self):
+        # akses status lewat app (BBTUI)
+        try: return self.app._st(self.pr["key"])
+        except Exception: return ""
+    def on_option_list_option_selected(self, ev):
+        act = ev.option.id
+        self.app.pop_screen()
+        if act and act != "_sep":
+            self.on_action(self.pr, act)
+
 class ResumePickerScreen(ModalScreen):
     """Pop-up daftar riwayat chat tersimpan -> pilih mana yang mau dilanjutkan.
 
@@ -2104,7 +2157,7 @@ class BBTUI(App):
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
-                ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("full_stop", "toggle_skip", "skip"),
+                ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("k", "mark_working", "kerja"), ("full_stop", "toggle_skip", "skip"),
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
                 ("escape", "clear_search", "")]   # redraw & mode-salin tak lagi di footer: glitch-nya sudah beres, salin cukup Ctrl+C. Sisa lewat /redraw dan /mouse.
     VIEWS = ["all", "baru", "belum", "ditinjau", "kerja", "skip"]
@@ -2349,6 +2402,29 @@ class BBTUI(App):
             tid = "tab-" + self.view
             if tabs.active != tid: tabs.active = tid
         except Exception: pass
+    def on_click(self, ev):
+        # KLIK KANAN (button 3) pada baris program -> menu konteks worklist
+        if getattr(ev, "button", 1) != 3: return
+        try: t = self.query_one("#tbl", DataTable)
+        except Exception: return
+        try:
+            rk = t.coordinate_to_cell_key(t.hover_coordinate).row_key
+        except Exception: return
+        pr = self.rowmap.get(rk)
+        if not pr: return
+        xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40), getattr(ev, "screen_y", None) or getattr(ev, "y", 10))
+        self.push_screen(ContextMenuScreen(pr, xy, self._ctx_action))
+    def _ctx_action(self, pr, act):
+        if act in ("reviewed", "working", "skip"):
+            self._set_st(pr["key"], act)
+            self.notify({"reviewed": "\U0001f441 ditinjau: ", "working": "\U0001f3af dikerjakan: ",
+                         "skip": "\U0001f515 di-skip: "}[act] + (pr["name"] or "")); self._render()
+        elif act == "belum":
+            self._set_st(pr["key"], ""); self.notify("\u00b7 kembali ke belum: " + (pr["name"] or "")); self._render()
+        elif act == "recon":
+            self._mark_working(pr); self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
+        elif act == "llm":
+            self._mark_working(pr); self.push_screen(LlmChatScreen(self.cfg, target=pr))
     def on_data_table_row_selected(self, ev):
         # ENTER = buka program dgn sengaja -> AUTO 👁 ditinjau (scroll biasa TIDAK menandai).
         pr = self.rowmap.get(ev.row_key)
@@ -2371,7 +2447,7 @@ class BBTUI(App):
               f"\n\n[b]Aset in-scope ({len(others)}):[/]\n" + ("\n".join('  ' + s for s in others[:40]) or '  -') +
               (f"\n  ... +{len(others)-40} lagi" if len(others) > 40 else "") +
               "\n\n[b]AKSI:[/] [yellow]e[/]=recon - [yellow]m[/]=monitor - [yellow]d[/]=dedup - [yellow]l[/]=llm-agent"
-              "\n[b]WORKLIST:[/] [yellow]Enter/v[/]=👁 ditinjau - [yellow].[/]=🔕 skip - [yellow]f[/]=ganti view - [yellow]b[/]=baru"
+              "\n[b]WORKLIST:[/] [yellow]v[/]=👁 - [yellow]k[/]=🎯 - [yellow].[/]=🔕 skip - [yellow]f[/]=view - atau [b]KLIK KANAN[/] baris utk menu"
               "\n[dim]recon/monitor/llm otomatis menandai 🎯 dikerjakan - ?=bantuan[/]")
         self.query_one("#detail", Static).update(md)
     def _selected(self):
@@ -2390,6 +2466,13 @@ class BBTUI(App):
         cur = self._st(pr["key"])
         self._set_st(pr["key"], "" if cur == "reviewed" else "reviewed")
         self.notify(("\U0001f441 ditinjau: " if self._st(pr["key"]) else "\u00b7 kembali ke belum: ") + (pr["name"] or ""))
+        self._render()
+    def action_mark_working(self):
+        pr = self._selected()
+        if not pr: return
+        cur = self._st(pr["key"])
+        self._set_st(pr["key"], "" if cur == "working" else "working")
+        self.notify(("\U0001f3af dikerjakan: " if self._st(pr["key"]) else "\u00b7 kembali ke belum: ") + (pr["name"] or ""))
         self._render()
     def action_toggle_skip(self):
         pr = self._selected()
