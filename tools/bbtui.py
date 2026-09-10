@@ -755,7 +755,7 @@ class HelpScreen(ModalScreen):
                 "  Kolom [b]S[/]: 🆕 baru  ·  [dim].[/] belum ditinjau  ·  👁 ditinjau  ·  🎯 dikerjakan  ·  🔕 skip\n"
                 "  [yellow]v[/] 👁 ditinjau   [yellow]k[/] 🎯 dikerjakan   [yellow].[/] 🔕 skip (tekan lagi=kembalikan)   [yellow]Enter[/] buka=👁\n"
                 "  [b]SOROT MOUSE[/] (klik+drag) atau [yellow]Space[/] = pilih MULTI - [yellow]a[/] semua - [yellow]Enter[/] MENU (ke semua terpilih) - [yellow]esc[/] batal\n"
-                "  [dim]MENU: ditinjau/kerja/skip/belum + recon/llm. Klik-kanan juga bila terminal izinkan; klik luar menu = tutup.\n"
+                "  [dim]MENU (Enter/klik-kanan): status worklist + recon/monitor/dedup/workspace/notify/ext-tools/handoff + llm/strategist. Klik luar = tutup.\n"
                 "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto 🎯\n\n"
                 "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
                 "  aset niche (android/ios/api) + unmanaged + program kurang 'dioptimalkan'. Makin tinggi = makin\n"
@@ -850,7 +850,8 @@ class GuideScreen(ModalScreen):
         ("DASHBOARD — MULTI-SELEKSI (proses banyak sekaligus)",
          "  [b]Sorot mouse[/] (klik+drag) ATAU [yellow]Space[/] tandai baris   [yellow]a[/] pilih semua tampil   [yellow]esc[/] batal\n"
          "  Klik biasa = pindah kursor saja (tak menyeleksi). Seleksi kuning hanya saat di-DRAG.\n"
-         "  [yellow]Enter[/] atau klik-kanan → MENU: terapkan status/recon/llm ke SEMUA yang terpilih.\n"
+         "  [yellow]Enter[/] atau klik-kanan → MENU LENGKAP: status worklist · recon/monitor/dedup · workspace ·\n"
+         "     notify · ext-tools · handoff pack · llm (hunting) · strategist — semua ke SEMUA yang terpilih.\n"
          "  [dim]Recon/monitor/dedup batch memakai profil PASIF (aman) untuk banyak target.[/]"),
         ("DUA MODE LLM — inti konsepnya",
          "  [b]DI DALAM[/] (tombol [yellow]l[/]) — sudah pilih target: agent fokus 1 program, scope resmi\n"
@@ -2243,12 +2244,17 @@ class ContextMenuScreen(ModalScreen):
         ("working",  "\U0001f3af Tandai Dikerjakan"),
         ("skip",     "\U0001f515 Skip (sembunyikan)"),
         ("belum",    "\u00b7 Kembalikan ke Belum"),
-        ("_sep", "\u2500\u2500\u2500\u2500\u2500"),
+        ("_sep1", "\u2500 proses target \u2500"),
         ("recon",    "\U0001f50e Recon"),
         ("monitor",  "\U0001f4e1 Monitor"),
         ("dedup",    "\U0001f501 Dedup"),
         ("workspace","\U0001f4c1 Workspace"),
-        ("llm",      "\U0001f916 LLM Agent"),
+        ("notify",   "\U0001f514 Notify (TG/Discord)"),
+        ("external", "\U0001f9f0 Ext-tools"),
+        ("handoff",  "\U0001f4e6 Handoff Pack (Burp)"),
+        ("_sep2", "\u2500 agent \u2500"),
+        ("llm",      "\U0001f916 LLM Agent (hunting)"),
+        ("strategist","\U0001f9ed Strategist (semua program)"),
     ]
     def __init__(self, prs, xy, on_action):
         super().__init__()
@@ -2274,12 +2280,12 @@ class ContextMenuScreen(ModalScreen):
             box.border_title = "\u2192 " + str(len(self.prs)) + " program terpilih"
         curst = self._cur()
         for act, label in self.ACTIONS:
-            if act == "_sep":
-                box.add_option(Option("[dim]" + label + "[/]", id="_sep", disabled=True)); continue
+            if act.startswith("_sep"):
+                box.add_option(Option("[dim]" + label + "[/]", id=act, disabled=True)); continue
             mark = "[green]\u2713[/] " if act == curst or (act == "belum" and not curst) else "  "
             box.add_option(Option(mark + label, id=act))
         box.highlighted = 0
-        w, h = 34, len(self.ACTIONS) + 3
+        w, h = 40, len(self.ACTIONS) + 3
         try:
             if self.xy:                                  # dekat kursor (klik kanan)
                 x, y = self.xy
@@ -2298,7 +2304,7 @@ class ContextMenuScreen(ModalScreen):
     def on_option_list_option_selected(self, ev):
         act = ev.option.id
         self.app.pop_screen()
-        if act and act != "_sep":
+        if act and not act.startswith("_sep"):
             self.on_action(self.prs, act)
 
 class ResumePickerScreen(ModalScreen):
@@ -2727,6 +2733,23 @@ class BBTUI(App):
             except Exception as e:
                 self.app.call_from_thread(lambda tgt=tgt, e=e: self.notify(f"\u2717 {kind} {tgt}: {str(e)[:50]}", severity="warning"))
         self.app.call_from_thread(lambda: self.notify(f"\u2713 {kind} batch selesai ({n} target)", timeout=6))
+    @work(thread=True)
+    def _run_handoff(self, prs):
+        la = _llm_mod(); n = len(prs); ok = 0
+        for i, pr in enumerate(prs, 1):
+            d = apex(pr)
+            if not d: continue
+            try:
+                res = la.t_handoff(d)
+                good = "belum ada" not in res and "[gagal]" not in res
+                ok += 1 if good else 0
+                msg = (f"✓ handoff {i}/{n}: {d}" if good
+                       else f"⚠ {d}: recon dulu (e/Recon) lalu ulangi")
+                self.app.call_from_thread(lambda m=msg: self.notify(m, timeout=5))
+            except (Exception, SystemExit) as e:
+                self.app.call_from_thread(lambda e=e: self.notify(f"✗ handoff {d}: {str(e)[:50]}", severity="warning"))
+        self.app.call_from_thread(lambda: self.notify(
+            f"\U0001f4e6 handoff selesai: {ok}/{n} pack dibuat (lihat ~/bb-recon/<domain>/handoff.md)", timeout=7))
     def _make_workspace(self, pr):
         if not pr: return False
         name = re.sub(r"\W", "_", (pr["name"] or "target"))[:40]
@@ -2766,6 +2789,24 @@ class BBTUI(App):
             made = sum(1 for pr in prs if self._make_workspace(pr))
             self.selected_keys.clear(); self._render()
             self.notify(f"\U0001f4c1 workspace dibuat/di-seed: {made} program")
+        elif act == "notify":
+            self.selected_keys.clear(); self._render()
+            for pr in prs: self._send_notify(pr)
+            self.notify(f"\U0001f514 mengirim {len(prs)} program ke channel notif...", timeout=4)
+        elif act == "external":
+            tgt = apex(prs[0]) if prs else ""
+            if len(prs) > 1:
+                self.notify(f"ext-tools: pakai target pertama ({tgt}) — jalankan satu per satu", timeout=5)
+            self.selected_keys.clear(); self._render()
+            self.push_screen(ExternalToolsScreen(self.cfg, tgt))
+        elif act == "handoff":
+            for pr in prs: self._mark_working(pr)
+            tgs = list(prs); self.selected_keys.clear(); self._render()
+            self.notify(f"\U0001f4e6 Handoff Pack: {len(tgs)} target (butuh recon dulu; latar)...", timeout=5)
+            self._run_handoff(tgs)
+        elif act == "strategist":
+            self.selected_keys.clear(); self._render()
+            self.action_strategist()                 # portfolio-level (abaikan baris terpilih)
         elif act == "llm":
             for p in prs: self._mark_working(p)
             tgs = list(prs); self.selected_keys.clear()
