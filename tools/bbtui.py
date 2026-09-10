@@ -1335,8 +1335,11 @@ class LlmChatScreen(ModalScreen):
                 ("ctrl+pageup", "log_up", "gulir naik"), ("ctrl+pagedown", "log_down", "gulir turun"),
                 ("ctrl+home", "log_home", "atas"), ("ctrl+end", "log_end", "bawah"),
                 ("f3", "toggle_active", "yolo")]
-    def __init__(self, cfg, target=None):
-        super().__init__(); self.cfg = cfg; self.target = target; self.messages = None
+    def __init__(self, cfg, target=None, targets=None):
+        super().__init__(); self.cfg = cfg
+        self.targets = targets if targets else ([target] if target else [])
+        self.target = self.targets[0] if self.targets else None
+        self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
@@ -1466,14 +1469,21 @@ class LlmChatScreen(ModalScreen):
             inp = self.query_one("#chatinput", ChatBox)
             if self.target and key:
                 self.messages = la.new_messages(prov == "anthropic")
-                self.messages.append({"role": "user", "content": program_context(self.target)})
-                g = classify_assets(self.target.get("scope", []))
-                present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
+                for _tg in self.targets:                       # suntik konteks SEMUA target terpilih
+                    self.messages.append({"role": "user", "content": program_context(_tg)})
                 nm = self.target.get("name")
-                # tanpa kurung siku: '[hackerone]' ditafsirkan Rich sebagai tag markup lalu dibuang
-                log.write(f"\n[b green]🎯 {nm}[/] [dim]· {self.target.get('platform')} · "
-                          f"{', '.join(present) or '-'} · wildcard {len(self.target.get('wild', []))} · "
-                          f"sev {self.target.get('maxsev', '-')}[/]")
+                if len(self.targets) > 1:
+                    names = ", ".join((t.get("name") or "?") for t in self.targets[:6])
+                    log.write(f"\n[b green]🎯 {len(self.targets)} TARGET terpilih:[/] [dim]{names}"
+                              + ("..." if len(self.targets) > 6 else "") + "[/]")
+                    self._suggest = (f"bandingkan & prioritaskan {len(self.targets)} target ini dari scope-nya, "
+                                     "lalu mulai dari yg paling menjanjikan: SCOPE-GATE + HUNTING BRIEF.")
+                else:
+                    g = classify_assets(self.target.get("scope", []))
+                    present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
+                    log.write(f"\n[b green]🎯 {nm}[/] [dim]· {self.target.get('platform')} · "
+                              f"{', '.join(present) or '-'} · wildcard {len(self.target.get('wild', []))} · "
+                              f"sev {self.target.get('maxsev', '-')}[/]")
                 prev = la.session_load(self.sess_key)
                 if prev:
                     log.write(f"[green]💾 sesi tersimpan ({len(prev)} pesan)[/] [dim]— ketik[/] [yellow]/resume[/]")
@@ -2040,8 +2050,8 @@ class ContextMenuScreen(ModalScreen):
         self.xy = xy; self.on_action = on_action
     def compose(self) -> ComposeResult:
         yield OptionList(id="ctxlist")
-    def on_click(self, ev):
-        # KLIK di LUAR menu -> tutup (permintaan user)
+    def on_mouse_down(self, ev):
+        # KLIK di LUAR kotak menu -> tutup (on_click tak sampai App -> pakai mouse_down)
         try:
             box = self.query_one("#ctxlist", OptionList)
             x = getattr(ev, "screen_x", None); y = getattr(ev, "screen_y", None)
@@ -2489,18 +2499,6 @@ class BBTUI(App):
             tid = "tab-" + self.view
             if tabs.active != tid: tabs.active = tid
         except Exception: pass
-    def on_click(self, ev):
-        # KLIK KANAN (button 3) pada baris program -> menu konteks worklist
-        if getattr(ev, "button", 1) != 3: return
-        try: t = self.query_one("#tbl", DataTable)
-        except Exception: return
-        try:
-            rk = t.coordinate_to_cell_key(t.hover_coordinate).row_key
-        except Exception: return
-        pr = self.rowmap.get(rk)
-        if not pr: return
-        xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40), getattr(ev, "screen_y", None) or getattr(ev, "y", 10))
-        self._open_menu(self._menu_targets(pr), xy)
     def _tool_target(self, kind, pr):
         if kind == "dedup":
             return pr["key"].split("|", 1)[1] if (pr["platform"] == "hackerone" and "|" in pr["key"]) else (pr["url"] or apex(pr))
@@ -2562,12 +2560,11 @@ class BBTUI(App):
             self.selected_keys.clear(); self._render()
             self.notify(f"\U0001f4c1 workspace dibuat/di-seed: {made} program")
         elif act == "llm":
-            pr = prs[0]
             for p in prs: self._mark_working(p)
-            self.selected_keys.clear()
-            if len(prs) > 1:
-                self.notify(f"LLM chat = 1 target: buka {pr['name']} ({len(prs)} ditandai \U0001f3af)", timeout=5)
-            self.push_screen(LlmChatScreen(self.cfg, target=pr))
+            tgs = list(prs); self.selected_keys.clear()
+            if len(tgs) > 1:
+                self.notify(f"LLM: {len(tgs)} target dimuat ke 1 chat (konteks semua) \U0001f3af", timeout=5)
+            self.push_screen(LlmChatScreen(self.cfg, targets=tgs))
     def on_data_table_row_selected(self, ev):
         # RowSelected muncul utk KLIK mouse DAN Enter. Klik ditangani drag-select ->
         # buka menu HANYA bila dipicu Enter keyboard (tak ada mouse-down barusan).
@@ -2604,11 +2601,24 @@ class BBTUI(App):
             cell = Text.from_markup(f"[black on yellow]{nm}[/]") if pr["key"] in self.selected_keys else Text(nm)
             try: t.update_cell(rk, "Program", cell)
             except Exception: pass
+    def _row_prog(self, t, row):
+        from textual.coordinate import Coordinate
+        try: return self.rowmap.get(t.coordinate_to_cell_key(Coordinate(row, 0)).row_key)
+        except Exception: return None
     def on_mouse_down(self, ev):
-        if getattr(ev, "button", 0) != 1: return       # kiri saja (kanan = menu)
+        b = getattr(ev, "button", 0)
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
         self._last_mouse = datetime.datetime.now()
+        if b == 3:                                     # KLIK KANAN -> menu (on_click tak sampai App!)
+            row = self._hover_row(t)
+            pr = self._row_prog(t, row) if row is not None else None
+            if pr:
+                xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40),
+                      getattr(ev, "screen_y", None) or getattr(ev, "y", 10))
+                self._open_menu(self._menu_targets(pr), xy)
+            return
+        if b != 1: return
         row = self._hover_row(t)
         if row is None: return
         self._drag_anchor = row; self._dragging = True
