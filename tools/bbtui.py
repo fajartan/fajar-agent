@@ -1674,26 +1674,22 @@ class LlmChatScreen(ModalScreen):
                     log.write(f"\n[b green]🎯 {nm}[/] [dim]· {self.target.get('platform')} · "
                               f"{', '.join(present) or '-'} · wildcard {len(self.target.get('wild', []))} · "
                               f"sev {self.target.get('maxsev', '-')}[/]")
-                # AUTO-LANJUT sesi terakhir target ini (ala ChatGPT). Multi-target = selalu baru.
-                latest = la.session_latest_for(self.target_slug) if len(self.targets) == 1 else None
-                if latest:
-                    self.messages = latest["messages"]; self.sess_id = latest["sid"]
-                    log.write(f"[green]💾 melanjutkan sesi terakhir ({latest['n']} pesan)[/] "
-                              "[dim]— [/][yellow]/new[/][dim] mulai bersih · [/][yellow]/resume[/][dim] riwayat lain[/]")
-                    self._render_history(self.messages)
-                    self._suggest = f"lanjutkan hunting {nm} dari sesi ini."
+                # BUKA = SESI BARU (fresh). Riwayat lama TIDAK auto-dimuat; cukup dihint
+                # -> buka lewat /resume. (sess_id sudah unik dari __init__.)
+                self.messages = la.new_messages(prov == "anthropic")
+                for _tg in self.targets:                       # suntik konteks SEMUA target terpilih
+                    self.messages.append({"role": "user", "content": program_context(_tg)})
+                hist = la.session_latest_for(self.target_slug) if len(self.targets) == 1 else None
+                if hist:
+                    log.write("[green]💾 ada sesi tersimpan utk target ini[/] [dim]— ketik[/] [yellow]/resume[/] [dim]utk buka riwayat[/]")
+                log.write("\n[b yellow]⏸ sesi baru — menunggu perintahmu[/] [dim]— Enter kirim · / menu[/]")
+                log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
+                if len(self.targets) > 1:
+                    self._suggest = (f"bandingkan & prioritaskan {len(self.targets)} target ini dari scope-nya, "
+                                     "lalu mulai dari yg paling menjanjikan: SCOPE-GATE + HUNTING BRIEF.")
                 else:
-                    self.messages = la.new_messages(prov == "anthropic")
-                    for _tg in self.targets:                   # suntik konteks SEMUA target terpilih
-                        self.messages.append({"role": "user", "content": program_context(_tg)})
-                    log.write("\n[b yellow]⏸ menunggu perintahmu[/] [dim]— Enter kirim · / menu[/]")
-                    log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
-                    if len(self.targets) > 1:
-                        self._suggest = (f"bandingkan & prioritaskan {len(self.targets)} target ini dari scope-nya, "
-                                         "lalu mulai dari yg paling menjanjikan: SCOPE-GATE + HUNTING BRIEF.")
-                    else:
-                        self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
-                                         "HUNTING BRIEF sesuai jenis aset.")
+                    self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
+                                     "HUNTING BRIEF sesuai jenis aset.")
             elif self.strategist and key:
                 # "DI LUAR": suntik portfolio -> agent jadi penasihat pemilihan target.
                 self.messages = la.new_messages(prov == "anthropic")
@@ -1793,9 +1789,12 @@ class LlmChatScreen(ModalScreen):
         self._autosave()
         self.app.pop_screen()
     def _autosave(self):
-        """Simpan sesi tanpa berisik. Kembalikan path bila sukses, None bila tidak."""
+        """Simpan sesi tanpa berisik. Kembalikan path bila sukses, None bila tidak.
+        Hanya simpan bila ADA percakapan nyata (turns>0) -> buka lalu tutup tanpa
+        ngobrol TIDAK bikin riwayat kosong (cuma konteks target) memenuhi /resume."""
         try:
-            if self.messages: return _llm_mod().session_save(self.sess_id, self.messages, target=self.target_slug)
+            if self.messages and self.turns > 0:
+                return _llm_mod().session_save(self.sess_id, self.messages, target=self.target_slug)
         except Exception: pass
         return None
     def on_unmount(self):
