@@ -2500,7 +2500,7 @@ class BBTUI(App):
         pr = self.rowmap.get(rk)
         if not pr: return
         xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40), getattr(ev, "screen_y", None) or getattr(ev, "y", 10))
-        self.push_screen(ContextMenuScreen(self._menu_targets(pr), xy, self._ctx_action))
+        self._open_menu(self._menu_targets(pr), xy)
     def _tool_target(self, kind, pr):
         if kind == "dedup":
             return pr["key"].split("|", 1)[1] if (pr["platform"] == "hackerone" and "|" in pr["key"]) else (pr["url"] or apex(pr))
@@ -2572,11 +2572,10 @@ class BBTUI(App):
         # RowSelected muncul utk KLIK mouse DAN Enter. Klik ditangani drag-select ->
         # buka menu HANYA bila dipicu Enter keyboard (tak ada mouse-down barusan).
         last = getattr(self, "_last_mouse", None)
-        if last and (datetime.datetime.now() - last).total_seconds() < 0.4:
+        if last and (datetime.datetime.now() - last).total_seconds() < 0.2:
             return
         pr = self.rowmap.get(ev.row_key)
-        prs = self._menu_targets(pr)
-        if prs: self.push_screen(ContextMenuScreen(prs, None, self._ctx_action))
+        self._open_menu(self._menu_targets(pr))
     # ---------- SELEKSI MOUSE: klik = 1, drag = rentang ----------
     def _hover_row(self, t):
         try:
@@ -2624,12 +2623,19 @@ class BBTUI(App):
         row = self._hover_row(t)
         if row is None: return
         self._apply_drag_range(t, getattr(self, "_drag_anchor", row), row)
-    def on_mouse_up(self, ev):
-        if not getattr(self, "_dragging", False): return
+    def _release_mouse_safe(self):
+        # WAJIB: kalau capture drag tak dilepas, menu/klik jadi 'stuck' (semua event
+        # mouse nyangkut ke tabel). Dipanggil di mouse-up DAN sebelum membuka menu.
         self._dragging = False
-        self._last_mouse = datetime.datetime.now()
         try: self.query_one("#tbl", DataTable).release_mouse()
         except Exception: pass
+        try: self.release_mouse()
+        except Exception: pass
+    def on_mouse_up(self, ev):
+        was = getattr(self, "_dragging", False)
+        self._release_mouse_safe()
+        self._last_mouse = datetime.datetime.now()
+        if not was: return
         n = len(self.selected_keys)
         if n: self.notify(f"{n} program terpilih (Enter=menu · esc=batal)", timeout=3)
         self._render()
@@ -2638,10 +2644,11 @@ class BBTUI(App):
             prs = [self.progs[k] for k in self.selected_keys if k in self.progs]
             if prs: return prs
         return [pr] if pr else []
+    def _open_menu(self, prs, xy=None):
+        self._release_mouse_safe()                 # pastikan tak stuck sebelum menu
+        if prs: self.push_screen(ContextMenuScreen(prs, xy, self._ctx_action))
     def action_ctx_menu(self):
-        pr = self._selected()
-        prs = self._menu_targets(pr)
-        if prs: self.push_screen(ContextMenuScreen(prs, None, self._ctx_action))
+        self._open_menu(self._menu_targets(self._selected()))
     def action_toggle_select(self):
         pr = self._selected()
         if not pr: return
