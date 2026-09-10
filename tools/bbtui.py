@@ -693,6 +693,8 @@ ModalScreen { align: center middle; }
 ModalScreen #stat { width: 84; max-height: 90%; border: round $accent; padding: 1 2; background: $panel; }
 ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
+GuideScreen #guide { width: 96%; max-height: 94%; border: round $accent; padding: 1 2; background: $panel; }
+GuideScreen #guide Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
 .setbtns { height: auto; margin: 1 0; }
 .setrow { height: auto; align: left middle; margin: 0; }
@@ -776,9 +778,152 @@ class HelpScreen(ModalScreen):
                 "  ENRICHMENT: provider (jina gratis / firecrawl / serper / h1api) + API key\n"
                 "  NOTIFIKASI: Telegram bot token+chat id, Discord webhook\n\n"
                 "[b]External tools[/]: edit [b]~/.config/bbtui/config.json[/] -> external_tools {nama: \"cmd {target}\"}.\n"
-                "[b]Kolom[/]: Program - Plat - Reward - WC(wildcard) - Aset - Sev.  [dim]esc = tutup[/]"
+                "[b]Kolom[/]: Program - Plat - Reward - WC(wildcard) - Aset - Sev.\n\n"
+                "[b green]>> tekan [yellow]i[/] untuk PANDUAN LENGKAP[/] [dim](semua alur, perintah, aturan + infografis)[/]  ·  [dim]esc = tutup[/]"
             )
     def action_dummy(self): pass
+
+class GuideScreen(ModalScreen):
+    """PANDUAN LENGKAP — semua alur, perintah, aturan & desain FAJAR-AGENT dalam satu layar gulir.
+    Dibuka dgn tombol [i] dari dashboard. Konten disusun per-seksi agar 1 error markup tak merusak semua."""
+    BINDINGS = [("escape", "app.pop_screen", "tutup"), ("i", "app.pop_screen", "tutup"),
+                ("q", "app.pop_screen", "tutup"),
+                ("up", "su", "naik"), ("down", "sd", "turun"),
+                ("pageup", "pu", "hal naik"), ("pagedown", "pd", "hal turun"),
+                ("home", "top", "atas"), ("end", "bot", "bawah")]
+    # \[..] = kurung LITERAL (mis. \[FAKTA]) supaya Rich tak menganggapnya tag markup lalu membuangnya.
+    SECTIONS = [
+        ("APA ITU FAJAR-AGENT",
+         "Harness bug-bounty: dashboard pemilihan program + agent LLM yang memandu SELURUH\n"
+         "rangkaian hunting secara BERTAHAP di bawah kendali penuh kamu.\n"
+         "Filosofi: agent MENGANALISA & MEMANDU; [b]kamu yang mengeksekusi & submit[/]. Anti-duplikat\n"
+         "(cari program/celah sepi) jadi fokus utama lewat skor Q."),
+        ("ATURAN POKOK (KERAS — tak bisa ditawar)",
+         "  [red]1[/] Agent [b]TIDAK PERNAH submit laporan[/] — draf disiapkan, pengiriman = kamu.\n"
+         "  [red]2[/] Agent [b]TIDAK PERNAH kirim traffic exploit/serangan sendiri[/] — kamu yang jalankan.\n"
+         "  [red]3[/] [b]TANPA password/token mentah[/] — hanya Personal Access Token yang kamu tempel di Settings.\n"
+         "  [red]4[/] [b]SCOPE-GATE[/] sebelum langkah aktif; uji hanya dgn akun milikmu sendiri.\n"
+         "  [red]5[/] Aksi aktif (kirim traffic, ext-tool) perlu [yellow]/yolo[/] ON — sengaja dibuat sadar."),
+        ("PETA ALUR — INFOGRAFIS",
+         "[b]Garis waktu end-to-end:[/]\n"
+         "[dim]  ┌─[/][b] 1 START    [/][dim]TUI memuat program (cache instan, auto-refresh bila basi)[/]\n"
+         "[dim]  │[/]\n"
+         "[dim]  ├─[/][b] 2 PILIH    [/]sorot 1 lalu [yellow]l[/][dim]  ·  atau[/] [yellow]t[/] [dim]STRATEGIST →[/] [yellow]/pick <nama>[/]\n"
+         "[dim]  │[/]\n"
+         "[dim]  ├─[/][b] 3 HUNTING  [/][dim]brief → uji terpandu → verify → draf  (CHECKPOINT tiap tahap)[/]\n"
+         "[dim]  │[/]\n"
+         "[dim]  ├─[/][b] 4 EKSEKUSI [/][dim]KAMU jalankan uji/PoC, tempel hasil ke chat[/]\n"
+         "[dim]  │[/]\n"
+         "[dim]  └─[/][b] 5 SUBMIT   [/][red]KAMU yang kirim[/][dim] — agent tak pernah submit[/]\n\n"
+         "[b]Dua mode LLM & handoff:[/]\n"
+         "[dim]     DASHBOARD[/] [dim]— program + skor Q + worklist[/]\n"
+         "[dim]       │[/]\n"
+         "[dim]       ├─[/] tekan [yellow]l[/] [dim](sudah pilih)[/]  →  [b cyan]CO-PILOT[/] [dim]· 1 target · hunting[/]\n"
+         "[dim]       │[/]\n"
+         "[dim]       └─[/] tekan [yellow]t[/] [dim](belum pilih)[/] →  [b green]STRATEGIST[/] [dim]· lihat semua program[/]\n"
+         "[dim]                                             │[/] [dim]rekomendasi 2-3 target + alasan[/]\n"
+         "[dim]                                             ↓[/]\n"
+         "[dim]                                       ketik[/] [yellow]/pick <nama>[/]\n"
+         "[dim]                                             ↓[/]\n"
+         "[dim]                                     [/][b cyan]CO-PILOT[/] [dim]— hunting PENUH (bukan cuma recon)[/]"),
+        ("ALUR UTAMA (dari nol sampai laporan)",
+         "  [b]1. MULAI[/]   jalankan TUI → dashboard memuat program (cache instan, auto-refresh bila basi).\n"
+         "  [b]2. PILIH[/]   dua cara (lihat 'DUA MODE LLM'):\n"
+         "            a) manual: sorot baris di tabel, tekan [yellow]l[/]\n"
+         "            b) minta saran: tekan [yellow]t[/] (STRATEGIST) → agent rekomendasi → [yellow]/pick <nama>[/]\n"
+         "  [b]3. HUNTING[/] agent jalan bertahap (TAHAP 1→…), berhenti di CHECKPOINT tiap tahap.\n"
+         "  [b]4. EKSEKUSI[/] kamu jalankan uji/PoC yang diperintahkan, tempel hasilnya ke chat.\n"
+         "  [b]5. VERIFY[/]  agent verifikasi + anti-dup + susun draf laporan.\n"
+         "  [b]6. SUBMIT[/]  [b]kamu[/] yang kirim ke platform. Selesai."),
+        ("DASHBOARD — navigasi & kolom",
+         "  [yellow]↑/↓[/] pindah baris   [yellow]/[/] cari nama/scope   [yellow]r[/] refresh data   [yellow]q[/] keluar\n"
+         "  [yellow]c[/] ganti urutan (platform→quiet→reward→assets)   [yellow]f[/] ganti view   [yellow]b[/] view BARU\n"
+         "  Kolom: [b]S[/](status) · Program · Plat · Reward · WC(wildcard) · Aset · Sev · [b]Q[/]\n"
+         "  [b]Q = skor QUIET (anti-ramai 0-100)[/]: proxy dari data nyata (baru + scope besar + aset niche\n"
+         "  android/ios/api + unmanaged). Makin TINGGI = makin mungkin sepi/minim-duplikat.\n"
+         "  [dim]Bukan hitungan hacker asli — itu tak tersedia di data gratis.[/]"),
+        ("DASHBOARD — WORKLIST (status tersimpan antar sesi)",
+         "  Ikon kolom S: 🆕 baru · [dim].[/] belum · 👁 ditinjau · 🎯 dikerjakan · 🔕 skip\n"
+         "  [yellow]v[/] 👁 ditinjau   [yellow]k[/] 🎯 kerja   [yellow].[/] 🔕 skip (tekan lagi = kembalikan)\n"
+         "  [yellow]Enter[/]/[yellow]Space[/] buka MENU pindah kategori (hormati multi-seleksi).\n"
+         "  View 'semua' menyembunyikan skip; view 'skip' untuk mengembalikannya."),
+        ("DASHBOARD — MULTI-SELEKSI (proses banyak sekaligus)",
+         "  [b]Sorot mouse[/] (klik+drag) ATAU [yellow]Space[/] tandai baris   [yellow]a[/] pilih semua tampil   [yellow]esc[/] batal\n"
+         "  Klik biasa = pindah kursor saja (tak menyeleksi). Seleksi kuning hanya saat di-DRAG.\n"
+         "  [yellow]Enter[/] atau klik-kanan → MENU: terapkan status/recon/llm ke SEMUA yang terpilih.\n"
+         "  [dim]Recon/monitor/dedup batch memakai profil PASIF (aman) untuk banyak target.[/]"),
+        ("DUA MODE LLM — inti konsepnya",
+         "  [b]DI DALAM[/] (tombol [yellow]l[/]) — sudah pilih target: agent fokus 1 program, scope resmi\n"
+         "     otomatis dimuat, langsung menyusun HUNTING BRIEF. (multi-seleksi → bandingkan lalu mulai.)\n\n"
+         "  [b]DI LUAR[/] (tombol [yellow]t[/]) — STRATEGIST, belum pilih target: agent menerima PORTFOLIO\n"
+         "     (semua program dashboard, urut skor Q + status worklist) lalu [b]merekomendasikan 2-3 target[/]\n"
+         "     terbaik beserta alasan (permukaan scope, kenapa sepi/anti-dup, jenis aset).\n\n"
+         "  [b]HANDOFF[/]: dari STRATEGIST ketik [yellow]/pick <nama>[/] → scope resmi target disuntik →\n"
+         "     lanjut rangkaian hunting PENUH (bukan berhenti di recon). Aktif-traffic & submit tetap kamu."),
+        ("TAHAP HUNTING (model checkpoint)",
+         "  DI DALAM satu tahap agent OTONOM (panggil tool aman berturut-turut). Antar tahap BERHENTI\n"
+         "  di CHECKPOINT → kamu balas [b]lanjut[/] / [b]stop[/] / arahan.\n"
+         "  TAHAP 1 HUNTING BRIEF  → memory/skill/dedup/recon-pasif → hipotesis prioritas (novel, anti-dup)\n"
+         "  TAHAP 2 EKSEKUSI TERPANDU → langkah uji 1-variabel persis; traffic aktif = [b]kamu[/]\n"
+         "  TAHAP 3 VERIFY & LAPORAN → analisa hasil tempelanmu → draf laporan\n"
+         "  TAHAP 4 SUBMIT = [b]HANYA KAMU[/]"),
+        ("AKSI CEPAT pada program tersorot (tombol dashboard)",
+         "  [yellow]e[/] Recon     web extract: subdomain+httpx+katana+JS+endpoint+gf → ~/bb-recon/ (profil passive/standard/deep)\n"
+         "  [yellow]m[/] Monitor   pantau subdomain BARU (multi-sumber) → ~/bb-monitor/ (cocok di-cron)\n"
+         "  [yellow]d[/] Dedup     kelas bug yang SUDAH dilaporkan di program → known-issues.md\n"
+         "  [yellow]w[/] Workspace folder target ~/bb-workspaces/<nama>/ (scope ter-seed)\n"
+         "  [yellow]n[/] Notify    kirim program ini ke Telegram/Discord\n"
+         "  [yellow]x[/] Ext-tools jalankan tool lain (hermes/neurosploit/nuclei/sqlmap) via command template\n"
+         "  [yellow]p[/] Pipeline  rangkaian OTOMATIS sekarang (finder→scope.md→dedup→recon)\n"
+         "  [yellow]g[/] Jadwal    pasang/hapus cron pipeline harian dari TUI"),
+        ("PERINTAH SLASH (di dalam CHAT agent)",
+         "  [b]hunting[/]  [yellow]/pick <nama>[/] pilih target strategist   [yellow]/target[/] lihat scope aktif\n"
+         "            [yellow]/recon[/] [yellow]/monitor[/] [yellow]/dedup[/] [dim]<domain>[/]   [yellow]/stage[/] lanjut tahap   [yellow]/handoff[/] Handoff Pack\n"
+         "            [yellow]/note <teks>[/] catat temuan   [yellow]/report[/] draf laporan   [yellow]/ext[/] ext-tools\n"
+         "  [b]sesi[/]     [yellow]/resume[/] pilih riwayat   [yellow]/new[/] sesi baru   [yellow]/save[/] simpan   [yellow]/export[/] ke .md\n"
+         "            [yellow]/clear[/] bersihkan layar   [yellow]/context[/] pemakaian token   [yellow]/compact[/] ringkas   [yellow]/add <path>[/] muat file\n"
+         "  [b]agent[/]    [yellow]/yolo[/] izinkan aksi aktif   [yellow]/model[/] [yellow]/provider[/]   [yellow]/memory[/] [yellow]/skills[/] [yellow]/tools[/] [yellow]/mcp[/]\n"
+         "  [dim]Sesi TERSIMPAN OTOMATIS tiap turn & saat keluar — /resume untuk lanjut.[/]"),
+        ("TOMBOL di dalam CHAT",
+         "  [yellow]Enter[/] kirim   [yellow]Alt+Enter[/] baris baru   [yellow]esc[/] stop proses   [yellow]Ctrl+Q[/] keluar sesi\n"
+         "  [yellow]Ctrl+PgUp/PgDn[/] gulir   [yellow]F3[/] yolo   [yellow]Ctrl+O[/] model   [yellow]Ctrl+R[/] resume   [yellow]Ctrl+L[/] bersihkan\n"
+         "  [yellow]Ctrl+C[/] salin tersorot   [yellow]Ctrl+V[/] tempel   [yellow]Ctrl+Click[/] buka URL"),
+        ("SETTINGS (tombol s) — API key & kriteria",
+         "  [b]LLM AGENT[/]  provider (anthropic/openai) + API key + model → wajib agar chat/strategist jalan.\n"
+         "  [b]PROGRAM[/]    token platform: HackerOne (h1_api_user + h1_api_token), Intigriti, Bugcrowd →\n"
+         "               menampilkan program PRIVATE (🔒) yang kamu punya akses.\n"
+         "     [dim]h1_api_user = USERNAME HackerOne kamu (bukan email). Token dari hackerone.com/settings/api_token.[/]\n"
+         "  [b]ENRICHMENT[/] jina(gratis)/firecrawl/serper untuk perkaya data scope.\n"
+         "  [b]NOTIFIKASI[/] Telegram token+chat id, Discord webhook.\n"
+         "  Tiap key ada tombol [yellow]Test API[/] (Ctrl+T) untuk cek benar-benar jalan."),
+        ("FITUR AGENT LANJUTAN",
+         "  [b]SKILLS[/]    playbook (program-selection, recon-runbook, web/api/mobile-vuln, anti-dup, report-kit)\n"
+         "            dimuat on-demand; bisa pasang baru via /skill install (sumber tepercaya).\n"
+         "  [b]MEMORI[/]   ingat lintas sesi (target/dedup/finding/learning) → anti-dup jangka panjang. /memory\n"
+         "  [b]DELEGATE[/] sub-agen paralel (recon/dedup/analysis) untuk kerja besar.\n"
+         "  [b]MCP[/]      sambung server MCP eksternal (/mcp connect).\n"
+         "  [b]HANDOFF PACK[/] (/handoff) → burp-targets.txt + handoff.md: daftar target Burp + endpoint prioritas."),
+        ("LOKASI DATA (Linux)",
+         "  ~/.config/bbtui/config.json     konfigurasi & API key\n"
+         "  ~/.config/bbtui/status.json     status worklist\n"
+         "  ~/.config/bbtui/programs_cache.json  cache program (agar tak tarik ulang tiap mulai)\n"
+         "  ~/.config/bbtui/agent-sessions/ riwayat chat (/resume)\n"
+         "  ~/bb-recon/  ~/bb-monitor/  ~/bb-workspaces/   hasil recon/monitor/workspace"),
+    ]
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="guide"):
+            yield Static("[b cyan]╭─ FAJAR-AGENT · PANDUAN LENGKAP ─╮[/]\n"
+                         "[dim]gulir: ↑/↓ · PgUp/PgDn · Home/End   ·   tutup: esc / i / q[/]", id="guidehdr")
+            for title, body in self.SECTIONS:
+                yield Static(f"\n[b yellow]▐ {title}[/]\n{body}")
+            yield Static("\n[dim]FAJAR-AGENT — analisa & pandu; eksekusi & submit tetap di tanganmu. Selamat berburu.[/]\n")
+    def _sc(self): return self.query_one("#guide", VerticalScroll)
+    def action_su(self): self._sc().scroll_up(animate=False)
+    def action_sd(self): self._sc().scroll_down(animate=False)
+    def action_pu(self): self._sc().scroll_page_up(animate=False)
+    def action_pd(self): self._sc().scroll_page_down(animate=False)
+    def action_top(self): self._sc().scroll_home(animate=False)
+    def action_bot(self): self._sc().scroll_end(animate=False)
 
 class SettingsScreen(ModalScreen):
     BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+s", "save", "simpan"), ("ctrl+t", "test_api", "test API")]
@@ -2305,7 +2450,7 @@ class BBTUI(App):
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("t", "strategist", "strategist"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
                 ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("k", "mark_working", "kerja"), ("full_stop", "toggle_skip", "skip"),
                 ("space", "toggle_select", "pilih"), ("a", "select_all", "pilih semua"),
-                ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
+                ("s", "settings", "settings"), ("i", "guide", "panduan"), ("question_mark", "help", "bantuan"),
                 ("escape", "clear_search", "")]   # redraw & mode-salin tak lagi di footer: glitch-nya sudah beres, salin cukup Ctrl+C. Sisa lewat /redraw dan /mouse.
     VIEWS = ["all", "baru", "belum", "ditinjau", "kerja", "skip"]
     VIEW_LABEL = {"all": "semua (skip disembunyikan)", "baru": "\U0001f195 baru", "belum": "belum ditinjau",
@@ -2922,6 +3067,7 @@ class BBTUI(App):
         self.copy_to_clipboard(text)
         self.notify(f"tersalin {len(text)} karakter")
     def action_help(self): self.push_screen(HelpScreen())
+    def action_guide(self): self.push_screen(GuideScreen())
     def action_external(self):
         pr = self._selected(); self.push_screen(ExternalToolsScreen(self.cfg, apex(pr) if pr else ""))
     def action_pipeline(self):
