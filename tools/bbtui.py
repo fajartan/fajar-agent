@@ -12,7 +12,7 @@ import json, os, re, sys, base64, shlex, shutil, datetime, subprocess, urllib.re
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll, Center, Middle
-    from textual.widgets import (Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar, TextArea)
+    from textual.widgets import (Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar, TextArea, Switch, Select)
     from textual.message import Message
     from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
@@ -618,6 +618,10 @@ ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
 .setbtns { height: auto; margin: 1 0; }
+.setrow { height: auto; align: left middle; margin: 0; }
+.setrow Switch { margin: 0 1 0 0; }
+.setrow Label { width: auto; }
+#stat Select { margin: 0 0 1 0; width: 62; }
 #apires { height: auto; margin: 1 0; padding: 0 1; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: round $primary; }
 #chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; layers: base pop; }
@@ -694,89 +698,114 @@ class HelpScreen(ModalScreen):
 class SettingsScreen(ModalScreen):
     BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+s", "save", "simpan"), ("ctrl+t", "test_api", "test API")]
     def __init__(self, cfg): super().__init__(); self.cfg = cfg
+    KEY_IDS = ("h1t", "itt", "ywt", "bct", "fc", "sp", "ntg", "ndc", "lkey")
     def compose(self) -> ComposeResult:
+        c = self.cfg
         with VerticalScroll(id="stat"):
-            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] simpan - [b]Ctrl+T[/] test semua API - esc batal)", classes="title")
+            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] simpan \u00b7 [b]Ctrl+T[/] test API \u00b7 esc batal)", classes="title")
             with Horizontal(classes="setbtns"):
-                yield Button("🔌 Test API", id="btntest", variant="primary")
-                yield Button("💾 Simpan", id="btnsave", variant="success")
+                yield Button("\U0001f50c Test API", id="btntest", variant="primary")
+                yield Button("\U0001f4be Simpan", id="btnsave", variant="success")
+            with Horizontal(classes="setrow"):
+                yield Switch(value=False, id="showkeys")
+                yield Label(" tampilkan API key (buka penyamaran utk verifikasi tempelan)")
             yield Static("", id="apires")
-            yield Label("\n[b yellow]-- KRITERIA PENCARIAN --[/]")
-            yield Label("Platform (6 sumber OTONOM, pisah koma): hackerone, bugcrowd, yeswehack, intigriti, federacy, disclose")
-            yield Label("[dim]disclose = 2400+ program independen/VDP (matikan 'wajib wildcard' utk lihat). Program PRIVATE H1 otomatis ikut bila h1 token diisi (🔒).[/]")
-            yield Input(value=",".join(self.cfg.get("platforms", [])), id="plat")
-            yield Label("Min bounty (0 = semua)")
-            yield Input(value=str(self.cfg.get("min_bounty", 0)), id="minb")
-            yield Label("Wajib wildcard? (y/n)")
-            yield Input(value="y" if self.cfg["require_wildcard"] else "n", id="wc")
-            yield Label("Jenis/fokus aset (kosong=semua; pisah koma): web, android, ios, api, mobile")
-            yield Input(value=self.cfg.get("asset_type", ""), id="atype")
-            yield Label("\n[b yellow]-- KRITERIA LANJUTAN (0/kosong/any = abaikan) --[/]")
-            yield Label("[dim]Semua di bawah berlaku LINTAS-PLATFORM. Yg berbasis data khusus (sev/efficiency/waktu) hanya "
-                        "menyaring di platform yg menyediakannya (kini: HackerOne) -- platform lain tidak dibuang.[/]")
-            yield Label("Min skor QUIET 0-100 -- [b]semua platform[/] (anti-ramai: baru+scope besar+niche+unmanaged)")
-            yield Input(value=str(self.cfg.get("min_quiet", 0)), id="mq")
-            yield Label("Urutkan: platform | quiet | reward | assets  (atau tekan c di layar utama)")
-            yield Input(value=self.cfg.get("sort", "platform"), id="sort")
-            yield Label("Min jumlah aset in-scope / Max aset (0=abaikan)")
-            yield Input(value=str(self.cfg.get("min_assets", 0)), id="mina")
-            yield Input(value=str(self.cfg.get("max_assets", 0)), id="maxa")
-            yield Label("Min jumlah wildcard (0=abaikan)")
-            yield Input(value=str(self.cfg.get("min_wildcards", 0)), id="minw")
-            yield Label("Program managed: any | only | exclude  (H1/Bugcrowd)")
-            yield Input(value=self.cfg.get("managed_filter", "any"), id="mgd")
-            yield Label("Min severity ceiling (H1 saja): kosong | low | medium | high | critical")
-            yield Input(value=self.cfg.get("min_sev", ""), id="msev")
-            yield Label("[dim]-- khusus HackerOne (dari data program): --[/]")
-            yield Label("Min response efficiency % (0=abaikan)")
-            yield Input(value=str(self.cfg.get("min_efficiency", 0)), id="meff")
-            yield Label("Max jam rata2 respon pertama / Max jam rata2 bayar (0=abaikan)")
-            yield Input(value=str(self.cfg.get("max_ttfr", 0)), id="mttfr")
-            yield Input(value=str(self.cfg.get("max_ttb", 0)), id="mttb")
-            yield Label("[dim]CATATAN JUJUR: jumlah hacker terdaftar & total bounty dibayar TIDAK ada di data gratis "
-                        "(hanya di halaman program). Q = proxy anti-ramai, bukan hitungan hacker asli.[/]")
-            yield Label("\n[b yellow]-- RECON & ENRICHMENT --[/]")
-            yield Label("[b green]firecrawl_api_key[/] [dim]— AKTIF: dipakai [b]/recon[/] profil deep (firecrawl map). Isi utk crawl lebih dalam.[/]")
-            yield Input(value=self.cfg.get("firecrawl_api_key", ""), id="fc", password=True)
-            yield Label(f"[dim]Provider enrichment ({', '.join(PROVIDERS)}) + serper_api_key: BELUM aktif di alur otomatis "
-                        "(fungsi enrich belum dipanggil). Disimpan utk pemakaian manual/nanti.[/]")
-            yield Input(value=self.cfg.get("enrich_provider", "jina"), id="prov")
-            yield Input(value=self.cfg.get("serper_api_key", ""), id="sp", password=True)
-            yield Label("h1_api_user + token -> tarik program yg BISA KAMU AKSES termasuk PRIVATE/invite (via API resmi H1). Buat token: hackerone.com/settings/api_token")
-            yield Label("h1_api_user"); yield Input(value=self.cfg.get("h1_api_user", ""), id="h1u")
-            yield Label("h1_api_token"); yield Input(value=self.cfg.get("h1_api_token", ""), id="h1t", password=True)
-            yield Label("[b green]intigriti_api_token[/] & [b green]yeswehack_api_token[/] [dim]— AKTIF: tarik program PRIVATE yg bisa kamu akses (🔒). Lihat feedback di panel kiri saat refresh (r).[/]")
-            yield Label("intigriti_api_token"); yield Input(value=self.cfg.get("intigriti_api_token", ""), id="itt", password=True)
-            yield Label("yeswehack_api_token"); yield Input(value=self.cfg.get("yeswehack_api_token", ""), id="ywt", password=True)
-            yield Label("[yellow]bugcrowd_api_token — BELUM aktif[/] [dim](Bugcrowd publik sudah dimuat via data publik; tarik-private belum didukung. Disimpan saja.)[/]")
-            yield Input(value=self.cfg.get("bugcrowd_api_token", ""), id="bct", password=True)
-            yield Label("\n[b yellow]-- NOTIFIKASI --[/]")
-            yield Label("Telegram bot token"); yield Input(value=self.cfg.get("telegram_token", ""), id="ntg", password=True)
-            yield Label("Telegram chat id"); yield Input(value=self.cfg.get("telegram_chat", ""), id="ntc")
-            yield Label("Discord webhook URL"); yield Input(value=self.cfg.get("discord_webhook", ""), id="ndc", password=True)
-            yield Label("\n[b yellow]-- TELEGRAM BOT (FAJAR-AGENT) --[/]")
-            yield Label("[dim]Pakai token+chat di atas. Jalankan bot: [b]bb.py telegram[/]. Chat id? kirim /start ke bot.[/]")
-            yield Label("Aktifkan bot? (y/n) -- master switch, bot menolak start bila 'n'")
-            yield Input(value="y" if self.cfg.get("telegram_bot_enabled") else "n", id="tgen")
-            yield Label("Default aksi-aktif/traffic saat bot mulai? (y/n) -- aman: n (harus /yolo di chat)")
-            yield Input(value="y" if self.cfg.get("telegram_allow_active") else "n", id="tgact")
-            yield Label("Allowlist chat id tambahan (pisah koma; kosong = hanya owner di 'Telegram chat id')")
-            yield Input(value=self.cfg.get("telegram_allowlist", ""), id="tgallow")
-            yield Label("\n[b yellow]-- LLM AGENT (otak otonom, opsional) --[/]")
-            yield Label("provider: anthropic | openai (openai = kompatibel Groq/OpenRouter/Ollama)")
-            yield Input(value=self.cfg.get("llm_provider", "anthropic"), id="lprov")
+
+            yield Label("\n[b yellow]-- LLM AGENT (otak otonom) --[/]")
+            yield Label("provider")
+            yield Select([("anthropic", "anthropic"), ("openai / kompatibel (Groq/OpenRouter/Ollama)", "openai")],
+                         value=(c.get("llm_provider") or "anthropic"), allow_blank=False, id="lprov")
             yield Label("model (mis. claude-sonnet-5 / gpt-4o-mini / llama3.1)")
-            yield Input(value=self.cfg.get("llm_model", ""), id="lmodel")
-            yield Label("base_url (openai-compatible saja, mis. http://localhost:11434/v1)")
-            yield Input(value=self.cfg.get("llm_base_url", ""), id="lbase")
-            yield Label("llm_api_key"); yield Input(value=self.cfg.get("llm_api_key", ""), id="lkey", password=True)
-            yield Label("llm_context (override context window token; 0 = auto dari model)")
-            yield Input(value=str(self.cfg.get("llm_context", 0)), id="lctx")
-            mcps = self.cfg.get("mcp_servers") or {}
-            yield Label(f"[dim]MCP: {len(mcps)} server terdaftar. Edit di ~/.config/bbtui/config.json -> \"mcp_servers\": "
-                        "{{\"nama\": {{\"command\":\"npx\",\"args\":[...],\"trusted\":false}}}}. Di chat: /mcp connect.[/]")
-            yield Label("[dim]Tool eksternal (hermes/neurosploit/nuclei): tekan x di layar utama untuk kelola.[/]")
-            yield Label("\n[b green]> SIMPAN: tekan Ctrl+S  (atau Enter di kotak isian mana pun)[/]  -  [dim]esc = batal tanpa simpan[/]")
+            yield Input(value=c.get("llm_model", ""), id="lmodel")
+            yield Label("base_url (khusus openai-compatible, mis. http://localhost:11434/v1)")
+            yield Input(value=c.get("llm_base_url", ""), id="lbase")
+            yield Label("llm_api_key")
+            yield Input(value=c.get("llm_api_key", ""), id="lkey", password=True)
+            yield Label("llm_context (override window token; 0 = auto)")
+            yield Input(value=str(c.get("llm_context", 0)), id="lctx")
+
+            yield Label("\n[b yellow]-- API KEY PLATFORM --[/]  [dim](tekan Test API utk cek)[/]")
+            yield Label("[b green]HackerOne[/] -- user+token tarik program yg BISA kamu akses (termasuk PRIVATE). Token: hackerone.com/settings/api_token")
+            yield Label("h1_api_user [dim](username H1, BUKAN email)[/]")
+            yield Input(value=c.get("h1_api_user", ""), id="h1u")
+            yield Label("h1_api_token")
+            yield Input(value=c.get("h1_api_token", ""), id="h1t", password=True)
+            yield Label("[b green]intigriti_api_token[/] & [b green]yeswehack_api_token[/] [dim]-- tarik PRIVATE[/]")
+            yield Input(value=c.get("intigriti_api_token", ""), id="itt", password=True)
+            yield Input(value=c.get("yeswehack_api_token", ""), id="ywt", password=True)
+            yield Label("[b green]firecrawl_api_key[/] [dim]-- dipakai /recon profil deep[/]")
+            yield Input(value=c.get("firecrawl_api_key", ""), id="fc", password=True)
+            yield Label("[yellow]bugcrowd_api_token -- BELUM aktif[/] [dim](publik sdh dimuat; private belum didukung)[/]")
+            yield Input(value=c.get("bugcrowd_api_token", ""), id="bct", password=True)
+
+            yield Label("\n[b yellow]-- KRITERIA PENCARIAN --[/]")
+            yield Label("Platform (pisah koma): hackerone, bugcrowd, yeswehack, intigriti, federacy, disclose")
+            yield Label("[dim]disclose = 2400+ VDP (matikan 'wajib wildcard' utk lihat). Private auto ikut bila token diisi.[/]")
+            yield Input(value=",".join(c.get("platforms", [])), id="plat")
+            yield Label("Min bounty (0 = semua)")
+            yield Input(value=str(c.get("min_bounty", 0)), id="minb")
+            with Horizontal(classes="setrow"):
+                yield Switch(value=bool(c.get("require_wildcard")), id="wc")
+                yield Label(" Wajib punya wildcard")
+            yield Label("Jenis/fokus aset (kosong=semua; koma): web, android, ios, api, mobile")
+            yield Input(value=c.get("asset_type", ""), id="atype")
+            yield Label("Urutkan")
+            yield Select([("platform", "platform"), ("quiet (anti-ramai)", "quiet"), ("reward", "reward"), ("assets", "assets")],
+                         value=(c.get("sort") or "platform"), allow_blank=False, id="sort")
+
+            yield Label("\n[b yellow]-- KRITERIA LANJUTAN (0/kosong/any = abaikan) --[/]")
+            yield Label("[dim]Lintas-platform; kriteria khusus (sev/efficiency/waktu) hanya menyaring platform yg punya datanya (kini H1).[/]")
+            yield Label("Min skor QUIET 0-100 (anti-ramai)")
+            yield Input(value=str(c.get("min_quiet", 0)), id="mq")
+            yield Label("Min / Max jumlah aset in-scope")
+            yield Input(value=str(c.get("min_assets", 0)), id="mina")
+            yield Input(value=str(c.get("max_assets", 0)), id="maxa")
+            yield Label("Min jumlah wildcard")
+            yield Input(value=str(c.get("min_wildcards", 0)), id="minw")
+            yield Label("Program managed (H1/Bugcrowd)")
+            yield Select([("any", "any"), ("hanya managed", "only"), ("kecuali managed", "exclude")],
+                         value=(c.get("managed_filter") or "any"), allow_blank=False, id="mgd")
+            yield Label("Min severity ceiling (H1)")
+            yield Select([("(abaikan)", ""), ("low", "low"), ("medium", "medium"), ("high", "high"), ("critical", "critical")],
+                         value=(c.get("min_sev") or ""), allow_blank=False, id="msev")
+            yield Label("[dim]-- khusus HackerOne: --[/]")
+            yield Label("Min response efficiency %")
+            yield Input(value=str(c.get("min_efficiency", 0)), id="meff")
+            yield Label("Max jam respon pertama / Max jam bayar")
+            yield Input(value=str(c.get("max_ttfr", 0)), id="mttfr")
+            yield Input(value=str(c.get("max_ttb", 0)), id="mttb")
+
+            yield Label("\n[b yellow]-- ENRICHMENT (belum aktif) --[/]")
+            yield Label("[dim]Provider + serper_api_key belum dipanggil di alur. Disimpan utk nanti.[/]")
+            yield Select([(p, p) for p in PROVIDERS], value=(c.get("enrich_provider") or "jina"), allow_blank=False, id="prov")
+            yield Input(value=c.get("serper_api_key", ""), id="sp", password=True)
+
+            yield Label("\n[b yellow]-- NOTIFIKASI --[/]")
+            yield Label("Telegram bot token")
+            yield Input(value=c.get("telegram_token", ""), id="ntg", password=True)
+            yield Label("Telegram chat id")
+            yield Input(value=c.get("telegram_chat", ""), id="ntc")
+            yield Label("Discord webhook URL")
+            yield Input(value=c.get("discord_webhook", ""), id="ndc", password=True)
+
+            yield Label("\n[b yellow]-- TELEGRAM BOT --[/]  [dim](jalankan: bb.py telegram)[/]")
+            with Horizontal(classes="setrow"):
+                yield Switch(value=bool(c.get("telegram_bot_enabled")), id="tgen")
+                yield Label(" Aktifkan bot (master switch)")
+            with Horizontal(classes="setrow"):
+                yield Switch(value=bool(c.get("telegram_allow_active")), id="tgact")
+                yield Label(" Default aksi-aktif/traffic saat bot mulai [dim](aman: OFF)[/]")
+            yield Label("Allowlist chat id tambahan (koma; kosong = hanya owner)")
+            yield Input(value=c.get("telegram_allowlist", ""), id="tgallow")
+
+            mcps = c.get("mcp_servers") or {}
+            yield Label(f"\n[dim]MCP: {len(mcps)} server. Edit di ~/.config/bbtui/config.json. Ext-tools: tekan x di layar utama.[/]")
+            yield Label("[b green]> SIMPAN: Ctrl+S[/]  [dim]- esc = batal[/]")
+    def on_switch_changed(self, ev):
+        if ev.switch.id == "showkeys":
+            for i in self.KEY_IDS:
+                try: self.query_one("#" + i, Input).password = not ev.value
+                except Exception: pass
     def on_input_submitted(self, _): self.action_save()
     def on_button_pressed(self, ev):
         if ev.button.id == "btnsave": self.action_save()
@@ -791,7 +820,7 @@ class SettingsScreen(ModalScreen):
         c["intigriti_api_token"] = g("itt"); c["yeswehack_api_token"] = g("ywt")
         c["bugcrowd_api_token"] = g("bct"); c["firecrawl_api_key"] = g("fc")
         c["serper_api_key"] = g("sp"); c["telegram_token"] = g("ntg")
-        c["llm_provider"] = g("lprov") or c.get("llm_provider", "anthropic")
+        c["llm_provider"] = self._sel("lprov", c.get("llm_provider", "anthropic"))
         c["llm_model"] = g("lmodel") or c.get("llm_model", "")
         c["llm_base_url"] = g("lbase") or c.get("llm_base_url", "")
         c["llm_api_key"] = g("lkey") or c.get("llm_api_key", "")
@@ -812,6 +841,14 @@ class SettingsScreen(ModalScreen):
         ok = sum(1 for _, st, _ in rows if st == "OK")
         lines.append(f"[dim]{ok} aktif & jalan[/]")
         self.app.call_from_thread(self.query_one("#apires", Static).update, chr(10).join(lines))
+    def _sw(self, i):
+        try: return bool(self.query_one("#" + i, Switch).value)
+        except Exception: return False
+    def _sel(self, i, default=""):
+        try:
+            v = self.query_one("#" + i, Select).value
+            return default if v is Select.BLANK else v
+        except Exception: return default
     def action_save(self):
         def g(i):
             try: return self.query_one("#" + i, Input).value.strip()
@@ -823,24 +860,24 @@ class SettingsScreen(ModalScreen):
             self.cfg["platforms"] = plats or DEFAULT_CFG["platforms"]
             mb = g("minb")
             self.cfg["min_bounty"] = int(re.sub(r"[^\d]", "", mb) or 0)   # tahan input non-angka
-            self.cfg["require_wildcard"] = g("wc").lower() != "n"
+            self.cfg["require_wildcard"] = self._sw("wc")
             self.cfg["asset_type"] = g("atype")
             digit = lambda i: int(re.sub(r"[^\d]", "", g(i)) or 0)
             self.cfg["min_quiet"] = digit("mq"); self.cfg["min_assets"] = digit("mina"); self.cfg["max_assets"] = digit("maxa")
             self.cfg["min_wildcards"] = digit("minw"); self.cfg["min_efficiency"] = digit("meff")
             self.cfg["max_ttfr"] = digit("mttfr"); self.cfg["max_ttb"] = digit("mttb")
-            self.cfg["sort"] = (g("sort") or "platform").lower()
-            self.cfg["managed_filter"] = (g("mgd") or "any").lower()
-            self.cfg["min_sev"] = g("msev").lower()
-            self.cfg["enrich_provider"] = g("prov") or "jina"
+            self.cfg["sort"] = self._sel("sort", "platform")
+            self.cfg["managed_filter"] = self._sel("mgd", "any")
+            self.cfg["min_sev"] = self._sel("msev", "")
+            self.cfg["enrich_provider"] = self._sel("prov", "jina")
             self.cfg["firecrawl_api_key"] = g("fc"); self.cfg["serper_api_key"] = g("sp")
             self.cfg["h1_api_user"] = g("h1u"); self.cfg["h1_api_token"] = g("h1t")
             self.cfg["bugcrowd_api_token"] = g("bct"); self.cfg["intigriti_api_token"] = g("itt"); self.cfg["yeswehack_api_token"] = g("ywt")
             self.cfg["telegram_token"] = g("ntg"); self.cfg["telegram_chat"] = g("ntc"); self.cfg["discord_webhook"] = g("ndc")
-            self.cfg["telegram_bot_enabled"] = g("tgen").lower() == "y"
-            self.cfg["telegram_allow_active"] = g("tgact").lower() == "y"
+            self.cfg["telegram_bot_enabled"] = self._sw("tgen")
+            self.cfg["telegram_allow_active"] = self._sw("tgact")
             self.cfg["telegram_allowlist"] = g("tgallow")
-            self.cfg["llm_provider"] = g("lprov") or "anthropic"; self.cfg["llm_model"] = g("lmodel")
+            self.cfg["llm_provider"] = self._sel("lprov", "anthropic"); self.cfg["llm_model"] = g("lmodel")
             self.cfg["llm_base_url"] = g("lbase"); self.cfg["llm_api_key"] = g("lkey")
             self.cfg["llm_context"] = digit("lctx")
             save_cfg(self.cfg)
