@@ -2301,8 +2301,8 @@ class BBTUI(App):
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
         refreshing = getattr(self, "_refreshing", False)
-        fresh = ("[b yellow]\u21bb menyegarkan data\u2026[/]" if refreshing
-                 else f"[green]\ud83d\udcbe tersimpan[/] [dim]\u00b7 {self._fresh_label()} \u00b7 r=segarkan[/]")
+        fresh = ("[b yellow]menyegarkan data...[/]" if refreshing
+                 else f"[green]tersimpan[/] [dim]{self._fresh_label()} - r=segar[/]")
         stat = f"{fresh}\n[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
         allp = list(self.progs.values())
         nb = sum(1 for p in allp if p["key"] in self.new_keys and not self._st(p["key"]))
