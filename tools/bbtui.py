@@ -2525,18 +2525,18 @@ class BBTUI(App):
         pr = self._selected()
         if not pr: return
         k = pr["key"]
-        if k in self.selected_keys: self.selected_keys.discard(k)
-        else: self.selected_keys.add(k)
+        if k in self.selected_keys: self.selected_keys.discard(k); onoff = "dilepas"
+        else: self.selected_keys.add(k); onoff = "DIPILIH"
         # perbarui 1 sel + panel (tanpa rebuild -> kursor tak lompat)
         try:
             from rich.text import Text
             t = self.query_one("#tbl", DataTable)
             nm = (pr["name"] or "-")[:32]
-            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if k in self.selected_keys else nm
+            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if k in self.selected_keys else Text(nm)
             rk = t.coordinate_to_cell_key(t.cursor_coordinate).row_key
             t.update_cell(rk, "Program", cell)
         except Exception: pass
-        self._render_stat()
+        self.notify(f"{onoff}: {pr['name']}  ·  total {len(self.selected_keys)} terpilih (Enter=menu)", timeout=3)
     def action_select_all(self):
         # pilih semua yg TAMPIL sekarang; kalau sudah ada terpilih -> batalkan semua
         if self.selected_keys:
