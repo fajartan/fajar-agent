@@ -387,18 +387,34 @@ def load_programs(cfg):
                 if pr and passes(pr, cfg): cur[pr["key"]] = pr
         except Exception as e:
             errs.append(f"{pf}: {e}")
-    # + program PRIVATE dari akun (bila token diisi) -- cakupan lebih luas lewat API token
-    if cfg.get("h1_api_user") and cfg.get("h1_api_token"):
-        priv, perr = fetch_h1_private(cfg, set(cur.keys()))
+    # + program PRIVATE dari akun (bila token diisi) -- SELALU beri feedback (masuk/ditolak/0)
+    # supaya user tahu tokennya berfungsi atau tidak (dulu diam saja kalau gagal).
+    def _pull(label, fn, *need):
+        miss = [n for n in need if not cfg.get(n)]
+        if miss: return                                  # token utama tak diisi -> lewati diam
+        priv, perr = fn(cfg, set(cur.keys()))
+        if perr:
+            errs.append(f"❌ {label}: {perr}"); return
+        masuk = 0
         for k, pr in priv.items():
-            if passes(pr, cfg): cur[k] = pr
-        if perr: errs.append(perr)
-    for fn, tokkey in ((fetch_intigriti_private, "intigriti_api_token"), (fetch_ywh_private, "yeswehack_api_token")):
-        if cfg.get(tokkey):
-            priv, perr = fn(cfg, set(cur.keys()))
-            for k, pr in priv.items():
-                if passes(pr, cfg): cur[k] = pr
-            if perr: errs.append(perr)
+            if passes(pr, cfg): cur[k] = pr; masuk += 1
+        ambil = len(priv)
+        if ambil == 0:
+            errs.append(f"⚠ {label}: token OK tapi 0 program diakses (cek izin/scope token, atau memang belum di-invite).")
+        elif masuk < ambil:
+            errs.append(f"🔒 {label}: +{masuk} tampil (dari {ambil}; sisanya tersaring filter — coba matikan 'wajib wildcard'/min-bounty).")
+        else:
+            errs.append(f"🔒 {label}: +{masuk} program private.")
+
+    # HackerOne butuh user + token; kalau salah satu kosong -> beri tahu tepat
+    if cfg.get("h1_api_token") and not cfg.get("h1_api_user"):
+        errs.append("⚠ HackerOne: token diisi tapi 'h1_api_user' KOSONG — isi username H1-mu (bukan email) di Settings.")
+    elif cfg.get("h1_api_user") and not cfg.get("h1_api_token"):
+        errs.append("⚠ HackerOne: username diisi tapi token kosong.")
+    else:
+        _pull("HackerOne private", fetch_h1_private, "h1_api_user", "h1_api_token")
+    _pull("Intigriti private", fetch_intigriti_private, "intigriti_api_token")
+    _pull("YesWeHack private", fetch_ywh_private, "yeswehack_api_token")
     return cur, errs
 
 # ---------- tool runner helpers ----------
@@ -1979,7 +1995,13 @@ class BBTUI(App):
         if mq: stat += f"\n[cyan]min-quiet: {int(mq)}[/]"
         stat += f"\n[dim]Q = skor anti-ramai (proxy)[/]"
         stat += f"\n[dim]enrich: {self.cfg.get('enrich_provider','jina')}[/]"
-        if errs: stat += "\n[red]" + "; ".join(errs)[:60] + "[/]"
+        if errs:
+            # tampil PENUH per baris (dulu dipotong 60 char -> diagnosa token hilang).
+            # baris diawali emoji status = info privat; sisanya = error platform publik.
+            stat += "\n"
+            for e in errs:
+                col = "green" if e.startswith("🔒") else ("yellow" if e[0] in "⚠" else "red")
+                stat += f"\n[{col}]{e}[/]"
         self.query_one("#stat", Static).update(stat)
     def on_data_table_row_highlighted(self, ev):
         pr = self.rowmap.get(ev.row_key)
