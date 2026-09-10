@@ -791,11 +791,6 @@ class SettingsScreen(ModalScreen):
             yield Input(value=str(c.get("max_ttfr", 0)), id="mttfr")
             yield Input(value=str(c.get("max_ttb", 0)), id="mttb")
 
-            yield Label("\n[b yellow]-- ENRICHMENT (belum aktif) --[/]")
-            yield Label("[dim]Provider + serper_api_key belum dipanggil di alur. Disimpan utk nanti.[/]")
-            yield Select([(p, p) for p in PROVIDERS], value=(c.get("enrich_provider") or "jina"), allow_blank=False, id="prov")
-            yield Input(value=c.get("serper_api_key", ""), id="sp", password=True)
-
             yield Label("\n[b yellow]-- NOTIFIKASI --[/]")
             yield Label("Telegram bot token")
             yield Input(value=c.get("telegram_token", ""), id="ntg", password=True)
@@ -835,7 +830,7 @@ class SettingsScreen(ModalScreen):
         c["h1_api_user"] = g("h1u"); c["h1_api_token"] = g("h1t")
         c["intigriti_api_token"] = g("itt"); c["yeswehack_api_token"] = g("ywt")
         c["bugcrowd_api_token"] = g("bct"); c["firecrawl_api_key"] = g("fc")
-        c["serper_api_key"] = g("sp"); c["telegram_token"] = g("ntg")
+        c["telegram_token"] = g("ntg")
         c["llm_provider"] = self._sel("lprov", c.get("llm_provider", "anthropic"))
         c["llm_model"] = g("lmodel") or c.get("llm_model", "")
         c["llm_base_url"] = g("lbase") or c.get("llm_base_url", "")
@@ -885,8 +880,8 @@ class SettingsScreen(ModalScreen):
             self.cfg["sort"] = self._sel("sort", "platform")
             self.cfg["managed_filter"] = self._sel("mgd", "any")
             self.cfg["min_sev"] = self._sel("msev", "")
-            self.cfg["enrich_provider"] = self._sel("prov", "jina")
-            self.cfg["firecrawl_api_key"] = g("fc"); self.cfg["serper_api_key"] = g("sp")
+            # enrich_provider & serper_api_key TAK lagi di UI (fitur enrich yatim) -> jaga nilai lama
+            self.cfg["firecrawl_api_key"] = g("fc")
             self.cfg["h1_api_user"] = g("h1u"); self.cfg["h1_api_token"] = g("h1t")
             self.cfg["bugcrowd_api_token"] = g("bct"); self.cfg["intigriti_api_token"] = g("itt"); self.cfg["yeswehack_api_token"] = g("ywt")
             self.cfg["telegram_token"] = g("ntg"); self.cfg["telegram_chat"] = g("ntc"); self.cfg["discord_webhook"] = g("ndc")
