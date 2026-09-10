@@ -2222,20 +2222,39 @@ class BBTUI(App):
             if self._is_stale(): self.load(announce=True)
         else:
             self.load(announce=True)
+    def _load_start_ui(self, empty):
+        # indikator loading yg JELAS: spinner bila tabel kosong (load pertama),
+        # atau border '↻ menyegarkan…' + toast bila cache sudah tampil.
+        try:
+            if empty: self.query_one("#tbl", DataTable).loading = True
+            else: self.query_one("#tablewrap").border_title = "PROGRAMS  [yellow]↻ menyegarkan…[/]"
+        except Exception: pass
+        self._render(getattr(self, "_last_errs", None))
+        self.notify("↻ menyegarkan data dari platform…", timeout=4)
+    def _load_done_ui(self):
+        try: self.query_one("#tbl", DataTable).loading = False
+        except Exception: pass
+        try: self.query_one("#tablewrap").border_title = "PROGRAMS"
+        except Exception: pass
     @work(thread=True)
     def load(self, announce=False):
         self._refreshing = True
-        self.app.call_from_thread(self._render, getattr(self, "_last_errs", None))
+        empty = not self.progs
+        self.app.call_from_thread(self._load_start_ui, empty)
         progs, errs = load_programs(self.cfg)
         prev_new = self.new_keys
         self.new_keys = self._diff_seen(progs)   # diff vs seen -> program yg BENAR-BENAR baru
         self.progs = progs
         self._fetched_at = datetime.datetime.now()
         self._refreshing = False
-        self._save_cache()
+        self._save_cache()                       # SAVE: cache tarikan -> start berikutnya instan
+        self.app.call_from_thread(self._load_done_ui)
         self.app.call_from_thread(self._render, errs)
         if announce and self.new_keys and self.new_keys != prev_new:
             self.app.call_from_thread(self._announce_new)
+        elif announce:
+            msg = f"✓ data terbaru — {len(progs)} program (tak ada yg baru)"
+            self.app.call_from_thread(lambda: self.notify(msg, timeout=4))
     def _announce_new(self):
         n = len(self.new_keys)
         self.view = "baru"; self._render()          # FOKUS BARU: auto-pindah ke tab 🆕
@@ -2282,7 +2301,8 @@ class BBTUI(App):
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
         refreshing = getattr(self, "_refreshing", False)
-        fresh = ("[yellow]\u21bb menyegarkan\u2026[/]" if refreshing else f"[dim]data: {self._fresh_label()}[/]")
+        fresh = ("[b yellow]\u21bb menyegarkan data\u2026[/]" if refreshing
+                 else f"[green]\ud83d\udcbe tersimpan[/] [dim]\u00b7 {self._fresh_label()} \u00b7 r=segarkan[/]")
         stat = f"{fresh}\n[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
         allp = list(self.progs.values())
         nb = sum(1 for p in allp if p["key"] in self.new_keys and not self._st(p["key"]))
