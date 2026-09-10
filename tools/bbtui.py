@@ -683,7 +683,7 @@ Screen { layout: vertical; background: $surface; }
 #detail { width: 1fr; border: round $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
 DataTable { height: 1fr; background: $surface; scrollbar-size-vertical: 2; scrollbar-background: $panel; scrollbar-color: $accent; scrollbar-color-hover: $warning; scrollbar-color-active: $warning; }
 DataTable > .datatable--header { text-style: bold; background: $primary; }
-DataTable > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
+DataTable > .datatable--cursor { background: #1e40af; color: #ffffff; text-style: bold; }
 #search { dock: bottom; display: none; border: round $accent; }
 #search.on { display: block; }
 .title { text-style: bold; color: $accent; }
@@ -2454,7 +2454,7 @@ class BBTUI(App):
         from rich.text import Text
         for p in items:
             nm = (p["name"] or "-")[:32]
-            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if p["key"] in self.selected_keys else nm
+            cell = Text.from_markup(f"[black on #ffd700]{nm}[/]") if p["key"] in self.selected_keys else nm
             rk = t.add_row(self._icon(p), cell, p["platform"][:3], reward(p), str(len(p["wild"])),
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
@@ -2476,7 +2476,7 @@ class BBTUI(App):
                  f"  [{'green' if nb else 'dim'}]🆕 baru {nb}[/]   [cyan]👁 ditinjau {nrev}[/]   [yellow]🎯 kerja {nwork}[/]\n"
                  f"  [dim]· belum {nbelum}   🔕 skip {nskip}[/]")
         if self.selected_keys:
-            stat += f"\n\n[b black on yellow] {len(self.selected_keys)} terpilih [/] [dim](Enter=menu utk semua · esc=batal)[/]"
+            stat += f"\n\n[b black on #ffd700] {len(self.selected_keys)} terpilih [/] [dim](Enter=menu utk semua · esc=batal)[/]"
         stat += f"\n[b]tampil:[/] {len(items)}  [dim](Space=pilih · Enter=menu · f=kategori)[/]"
         # perbarui label tab dgn jumlah + aktifkan tab sesuai view
         try:
@@ -2624,7 +2624,7 @@ class BBTUI(App):
             rk = k2rk.get(key); pr = self.rowmap.get(rk) if rk is not None else None
             if not pr: continue
             nm = (pr["name"] or "-")[:32]
-            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if key in self.selected_keys else Text(nm)
+            cell = Text.from_markup(f"[black on #ffd700]{nm}[/]") if key in self.selected_keys else Text(nm)
             try: t.update_cell(rk, "Program", cell)
             except Exception: pass
     def _row_prog(self, t, row):
@@ -2699,7 +2699,7 @@ class BBTUI(App):
             from rich.text import Text
             t = self.query_one("#tbl", DataTable)
             nm = (pr["name"] or "-")[:32]
-            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if k in self.selected_keys else Text(nm)
+            cell = Text.from_markup(f"[black on #ffd700]{nm}[/]") if k in self.selected_keys else Text(nm)
             rk = t.coordinate_to_cell_key(t.cursor_coordinate).row_key
             t.update_cell(rk, "Program", cell)
         except Exception: pass
@@ -2727,6 +2727,8 @@ class BBTUI(App):
         pr = getattr(self, "_pending_detail", None)
         if not pr:
             return
+        try: detail = self.query_one("#detail", Static)   # timer bisa nembak saat screen ganti
+        except Exception: return
         others = [s for s in pr["scope"] if not is_wild(s)]
         mgd = {True: "managed", False: "unmanaged", None: "-"}.get(pr.get("managed"))
         md = (f"[b cyan]{pr['name']}[/] [{pr['platform']}]"
@@ -2741,7 +2743,8 @@ class BBTUI(App):
               "\n\n[b]AKSI:[/] [yellow]e[/]=recon - [yellow]m[/]=monitor - [yellow]d[/]=dedup - [yellow]l[/]=llm-agent"
               "\n[b]WORKLIST:[/] [yellow]Enter[/]/[yellow]Space[/]=MENU pindah kategori - [yellow]v[/]=👁 [yellow]k[/]=🎯 [yellow].[/]=🔕 - [yellow]f[/]=view"
               "\n[dim]recon/monitor/llm otomatis 🎯 - klik-kanan juga (bila terminal mengizinkan) - ?=bantuan[/]")
-        self.query_one("#detail", Static).update(md)
+        try: detail.update(md)
+        except Exception: pass
     def _selected(self):
         t = self.query_one("#tbl", DataTable)
         try: return self.rowmap.get(t.coordinate_to_cell_key(t.cursor_coordinate).row_key)
