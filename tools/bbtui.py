@@ -2751,8 +2751,6 @@ class BBTUI(App):
         elif sort == "reward": items.sort(key=lambda x: (-(x["bounty_max"] or 0), (x["name"] or "").lower()))
         elif sort == "assets": items.sort(key=lambda x: (-len(x["scope"]), (x["name"] or "").lower()))
         else: items.sort(key=lambda x: (x["key"] not in self.new_keys, x["platform"], (x["name"] or "").lower()))
-        per = {}
-        for p in self.progs.values(): per[p["platform"]] = per.get(p["platform"], 0) + 1
         from rich.text import Text
         for p in items:
             nm = (p["name"] or "-")[:32]
@@ -2764,22 +2762,32 @@ class BBTUI(App):
         try:
             if self.rowmap: t.move_cursor(row=max(0, min(_keep_row, len(self.rowmap) - 1)))
         except Exception: pass
+        self._side_panel(len(items), errs)
+    def _side_panel(self, n_shown, errs=None):
+        """Bangun HANYA panel samping (stat + label tab). Dipisah dari _render supaya
+        perubahan status 1-baris bisa memperbarui ini TANPA membangun ulang tabel (mahal)."""
+        per = {}
+        for p in self.progs.values(): per[p["platform"]] = per.get(p["platform"], 0) + 1
+        mq = _num(self.cfg, "min_quiet")
         refreshing = getattr(self, "_refreshing", False)
         fresh = ("[b yellow]menyegarkan data...[/]" if refreshing
                  else f"[green]tersimpan[/] [dim]{self._fresh_label()} - r=segar[/]")
         stat = f"{fresh}\n[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
         allp = list(self.progs.values())
-        nb = sum(1 for p in allp if p["key"] in self.new_keys and not self._st(p["key"]))
-        nrev = sum(1 for p in allp if self._st(p["key"]) == "reviewed")
-        nwork = sum(1 for p in allp if self._st(p["key"]) == "working")
-        nskip = sum(1 for p in allp if self._st(p["key"]) == "skip")
-        nbelum = sum(1 for p in allp if not self._st(p["key"]) and p["key"] not in self.new_keys)
+        nb = nrev = nwork = nskip = nbelum = 0        # SATU lintasan (dulu 5 lintasan terpisah)
+        for p in allp:
+            st = self._st(p["key"])
+            if st == "reviewed": nrev += 1
+            elif st == "working": nwork += 1
+            elif st == "skip": nskip += 1
+            elif p["key"] in self.new_keys: nb += 1
+            else: nbelum += 1
         stat += (f"\n\n[b]WORKLIST[/]\n"
                  f"  [{'green' if nb else 'dim'}]🆕 baru {nb}[/]   [cyan]👁 ditinjau {nrev}[/]   [yellow]🎯 kerja {nwork}[/]\n"
                  f"  [dim]· belum {nbelum}   🔕 skip {nskip}[/]")
         if self.selected_keys:
             stat += f"\n\n[b black on #ffd700] {len(self.selected_keys)} terpilih [/] [dim](Enter=menu utk semua · esc=batal)[/]"
-        stat += f"\n[b]tampil:[/] {len(items)}  [dim](Space=pilih · Enter=menu · f=kategori)[/]"
+        stat += f"\n[b]tampil:[/] {n_shown}  [dim](Space=pilih · Enter=menu · f=kategori)[/]"
         # perbarui label tab dgn jumlah + aktifkan tab sesuai view
         try:
             counts = {"all": len(allp) - nskip, "baru": nb, "belum": nbelum,
@@ -2804,6 +2812,36 @@ class BBTUI(App):
                 col = "green" if e.startswith("🔒") else ("yellow" if e[0] in "⚠" else "red")
                 stat += f"\n[{col}]{e}[/]"
         self.query_one("#stat", Static).update(stat)
+    def _view_ok(self, pr):
+        """Apakah pr TAMPIL di view sekarang (cermin rantai filter _render, tanpa urut)."""
+        k = pr["key"]; st = self._st(k); v = self.view
+        mq = _num(self.cfg, "min_quiet")
+        if mq and self._q(pr) < mq and "PRIVATE" not in str(pr.get("signal", "")): return False
+        if v != "skip" and st == "skip": return False
+        if v == "baru" and k not in self.new_keys: return False
+        if v == "belum" and (st or k in self.new_keys): return False
+        if v == "ditinjau" and st != "reviewed": return False
+        if v == "kerja" and st != "working": return False
+        if v == "skip" and st != "skip": return False
+        if self.filter:
+            f = self.filter.lower()
+            if not (f in (pr["name"] or "").lower() or any(f in s.lower() for s in pr["scope"])): return False
+        return True
+    def _fast_status(self, pr):
+        """Update status 1-baris: kalau baris TETAP tampil -> cukup ubah ikon sel + panel
+        samping (instan). Kalau masuk/keluar view -> _render penuh (perlu susun ulang)."""
+        was = pr["key"] in getattr(self, "_key2rk", {})   # rowmap di-key ROW-key; peta prog-key = _key2rk
+        now = self._view_ok(pr)
+        if was and now:
+            rk = self._key2rk.get(pr["key"])
+            try:
+                if rk is None: raise KeyError
+                self.query_one("#tbl", DataTable).update_cell(rk, "S", self._icon(pr))
+                self._side_panel(len(self.rowmap))
+                return
+            except Exception:
+                pass
+        self._render()
     def on_tabs_tab_activated(self, ev):
         if ev.tabs.id != "cattabs": return
         want = (ev.tab.id or "tab-all").replace("tab-", "")
@@ -3104,14 +3142,14 @@ class BBTUI(App):
         cur = self._st(pr["key"])
         self._set_st(pr["key"], "" if cur == "reviewed" else "reviewed")
         self.notify(("\U0001f441 ditinjau: " if self._st(pr["key"]) else "\u00b7 kembali ke belum: ") + (pr["name"] or ""))
-        self._render()
+        self._fast_status(pr)
     def action_mark_working(self):
         pr = self._selected()
         if not pr: return
         cur = self._st(pr["key"])
         self._set_st(pr["key"], "" if cur == "working" else "working")
         self.notify(("\U0001f3af dikerjakan: " if self._st(pr["key"]) else "\u00b7 kembali ke belum: ") + (pr["name"] or ""))
-        self._render()
+        self._fast_status(pr)
     def action_toggle_skip(self):
         pr = self._selected()
         if not pr: return
@@ -3121,7 +3159,7 @@ class BBTUI(App):
         else:
             self._set_st(pr["key"], "skip")
             self.notify("\U0001f515 di-skip (disembunyikan; view Skip [f] utk kembalikan): " + (pr["name"] or ""))
-        self._render()
+        self._fast_status(pr)
     def _mark_working(self, pr):
         if pr and self._st(pr["key"]) != "skip": self._set_st(pr["key"], "working")
     def action_cycle_sort(self):
