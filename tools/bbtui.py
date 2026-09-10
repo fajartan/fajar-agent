@@ -2445,6 +2445,7 @@ class BBTUI(App):
             rk = t.add_row(self._icon(p), cell, p["platform"][:3], reward(p), str(len(p["wild"])),
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
+        self._key2rk = {pr["key"]: rk for rk, pr in self.rowmap.items()}   # peta cepat utk update sel
         try:
             if self.rowmap: t.move_cursor(row=max(0, min(_keep_row, len(self.rowmap) - 1)))
         except Exception: pass
@@ -2595,10 +2596,14 @@ class BBTUI(App):
                 pass
         if newsel == self.selected_keys:
             return
+        changed = newsel ^ self.selected_keys           # hanya baris yg berubah status
         self.selected_keys = newsel
-        for rk, pr in list(self.rowmap.items()):        # highlight ulang baris tampil
+        k2rk = getattr(self, "_key2rk", {})
+        for key in changed:
+            rk = k2rk.get(key); pr = self.rowmap.get(rk) if rk is not None else None
+            if not pr: continue
             nm = (pr["name"] or "-")[:32]
-            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if pr["key"] in self.selected_keys else Text(nm)
+            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if key in self.selected_keys else Text(nm)
             try: t.update_cell(rk, "Program", cell)
             except Exception: pass
     def _row_prog(self, t, row):
@@ -2628,8 +2633,8 @@ class BBTUI(App):
         self.selected_keys = set()                     # klik = mulai seleksi baru
         self._apply_drag_range(t, row, row)
     def on_mouse_move(self, ev):
+        if not getattr(self, "_dragging", False): return   # kasus umum (tak drag) -> keluar cepat
         if isinstance(self.screen, ModalScreen): return
-        if not getattr(self, "_dragging", False): return
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
         row = self._hover_row(t)
@@ -2836,15 +2841,17 @@ class BBTUI(App):
     def action_schedule(self):
         self.push_screen(SchedulerScreen())
     def action_llm(self):
-        pr = self._selected(); self._mark_working(pr); self.push_screen(LlmChatScreen(self.cfg, target=pr))
+        prs = self._menu_targets(self._selected())
+        if prs: self._ctx_action(prs, "llm")       # hormati multi-seleksi (bukan cuma 1)
     def action_recon(self):
-        pr = self._selected(); self._mark_working(pr); self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
+        prs = self._menu_targets(self._selected())
+        if prs: self._ctx_action(prs, "recon")
     def action_monitor(self):
-        pr = self._selected(); self._mark_working(pr); self.push_screen(ToolScreen("monitor", apex(pr) if pr else ""))
+        prs = self._menu_targets(self._selected())
+        if prs: self._ctx_action(prs, "monitor")
     def action_dedup(self):
-        pr = self._selected()
-        d = "" if not pr else (pr["key"].split("|", 1)[1] if (pr["platform"] == "hackerone" and "|" in pr["key"]) else (pr["url"] or apex(pr)))
-        self.push_screen(ToolScreen("dedup", d))
+        prs = self._menu_targets(self._selected())
+        if prs: self._ctx_action(prs, "dedup")
     def action_notify(self):
         pr = self._selected()
         if not pr: self.notify("pilih program dulu"); return
