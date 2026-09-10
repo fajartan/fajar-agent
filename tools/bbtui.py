@@ -2312,21 +2312,8 @@ class BBTUI(App):
             return orig(x, *a, **k)
         drv.write = w
         self._trace_path = path
-    def _lean_mouse(self):
-        # PERF: mode 1003 (ANY_EVENT) membanjiri event tiap mouse bergerak walau tanpa
-        # tombol -> app berat. Turun ke 1002 (BUTTON_EVENT): motion HANYA saat tombol
-        # ditekan. Drag pakai META event (bukan hover) -> tetap jalan. Hover-highlight
-        # (tak dipakai) nonaktif. Diulang saat resize krn Textual bisa re-set 1003.
-        try:
-            drv = getattr(self, "_driver", None)
-            if drv: drv.write("\x1b[?1003l\x1b[?1002h"); drv.flush()
-        except Exception:
-            pass
-    def on_resize(self, ev):
-        self._lean_mouse()
     def on_mount(self):
         self._trace_on()
-        self._lean_mouse()
         t = self.query_one("#tbl", DataTable)
         t.add_columns("S", "Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
@@ -2648,33 +2635,39 @@ class BBTUI(App):
         if b != 1: return
         row = self._ev_row(ev, t)
         if row is None: return
-        self._drag_anchor = row; self._dragging = True
-        try: t.capture_mouse()
-        except Exception: pass
-        self.selected_keys = set()                     # klik = mulai seleksi baru
-        self._apply_drag_range(t, row, row)
+        # TIDAK capture_mouse (bisa nyangkut -> "jalan sendiri"). TIDAK reset seleksi
+        # & TIDAK apply range di sini: klik biasa = pindah KURSOR saja (biar tabel yg
+        # urus). Seleksi kuning baru dimulai kalau mouse benar2 BERGERAK (drag).
+        self._drag_anchor = row; self._dragging = True; self._drag_moved = False
     def on_mouse_move(self, ev):
         if not getattr(self, "_dragging", False): return   # kasus umum (tak drag) -> keluar cepat
-        if isinstance(self.screen, ModalScreen): return
+        if getattr(ev, "button", 0) != 1:                  # tombol sudah dilepas (up terlewat) -> stop
+            self._dragging = False; return
+        if isinstance(self.screen, ModalScreen):
+            self._dragging = False; return
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
         row = self._ev_row(ev, t)
         if row is None: return
-        self._apply_drag_range(t, getattr(self, "_drag_anchor", row), row)
+        anchor = getattr(self, "_drag_anchor", row)
+        if row == anchor and not getattr(self, "_drag_moved", False):
+            return                                         # masih di baris awal -> belum drag
+        if not getattr(self, "_drag_moved", False):
+            self._drag_moved = True
+            self.selected_keys = set()                     # gerakan pertama -> mulai seleksi baru
+        self._apply_drag_range(t, anchor, row)
     def _release_mouse_safe(self):
-        # WAJIB: kalau capture drag tak dilepas, menu/klik jadi 'stuck' (semua event
-        # mouse nyangkut ke tabel). Dipanggil di mouse-up DAN sebelum membuka menu.
-        self._dragging = False
+        self._dragging = False; self._drag_moved = False
         try: self.query_one("#tbl", DataTable).release_mouse()
         except Exception: pass
         try: self.release_mouse()
         except Exception: pass
     def on_mouse_up(self, ev):
         if isinstance(self.screen, ModalScreen): return
-        was = getattr(self, "_dragging", False)
+        was_drag = getattr(self, "_dragging", False) and getattr(self, "_drag_moved", False)
         self._release_mouse_safe()
         self._last_mouse = datetime.datetime.now()
-        if not was: return
+        if not was_drag: return                            # klik biasa -> tak ada seleksi, diam
         n = len(self.selected_keys)
         if n: self.notify(f"{n} program terpilih (Enter=menu · esc=batal)", timeout=3)
         self._render()
