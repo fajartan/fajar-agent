@@ -27,6 +27,8 @@ DISCLOSE_URL = "https://raw.githubusercontent.com/disclose/diodb/master/program-
 CFG_DIR = os.path.expanduser("~/.config/bbtui"); CFG = os.path.join(CFG_DIR, "config.json")
 SEEN = os.path.join(CFG_DIR, "seen.json")  # baseline utk deteksi PROGRAM BARU antar sesi
 STATUS = os.path.join(CFG_DIR, "status.json")  # status worklist per program: reviewed/working/skip
+CACHE = os.path.join(CFG_DIR, "programs_cache.json")  # cache tarikan terakhir (start instan)
+STALE_HOURS = 6  # cache lebih tua dari ini -> auto-refresh di latar saat start
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", "federacy"],
                "require_wildcard": True, "min_bounty": 0, "asset_type": "", "mouse": True,
@@ -2177,16 +2179,67 @@ class BBTUI(App):
         self.query_one("#side").border_title = "DASHBOARD"
         self.query_one("#tablewrap").border_title = "PROGRAMS"
         self.query_one("#detail").border_title = "DETAIL"
-        self.load()
+        self._boot()
         self.set_focus(t)   # penting: fokus ke tabel, bukan ke kotak search
         self.push_screen(SplashScreen())   # banner pembuka (sekalian nutup loading)
+    def _save_cache(self):
+        try:
+            os.makedirs(CFG_DIR, exist_ok=True)
+            json.dump({"fetched_at": datetime.datetime.now().isoformat(),
+                       "programs": self.progs, "new_keys": sorted(self.new_keys)},
+                      open(CACHE, "w", encoding="utf-8"))
+        except Exception: pass
+    def _load_cache(self):
+        try:
+            d = json.load(open(CACHE, encoding="utf-8"))
+            progs = d.get("programs") or {}
+            if not progs: return None
+            nk = set(d.get("new_keys") or [])
+            at = None
+            try: at = datetime.datetime.fromisoformat(d.get("fetched_at"))
+            except Exception: pass
+            return progs, nk, at
+        except Exception:
+            return None
+    def _is_stale(self):
+        at = getattr(self, "_fetched_at", None)
+        if not at: return True
+        return (datetime.datetime.now() - at).total_seconds() > STALE_HOURS * 3600
+    def _fresh_label(self):
+        at = getattr(self, "_fetched_at", None)
+        if not at: return "belum ada tarikan"
+        sec = int((datetime.datetime.now() - at).total_seconds())
+        if sec < 90: return "baru saja"
+        if sec < 3600: return f"{sec // 60} menit lalu"
+        if sec < 86400: return f"{sec // 3600} jam lalu"
+        return f"{sec // 86400} hari lalu"
+    def _boot(self):
+        cache = self._load_cache()
+        if cache:
+            # START INSTAN: tampilkan cache dulu, lalu segarkan di latar bila basi
+            self.progs, self.new_keys, self._fetched_at = cache
+            self._render()
+            if self._is_stale(): self.load(announce=True)
+        else:
+            self.load(announce=True)
     @work(thread=True)
-    def load(self):
-        self.app.call_from_thread(self.query_one("#stat", Static).update, "[cyan]menarik 5 platform...[/]")
+    def load(self, announce=False):
+        self._refreshing = True
+        self.app.call_from_thread(self._render, getattr(self, "_last_errs", None))
         progs, errs = load_programs(self.cfg)
+        prev_new = self.new_keys
+        self.new_keys = self._diff_seen(progs)   # diff vs seen -> program yg BENAR-BENAR baru
         self.progs = progs
-        self.new_keys = self._diff_seen(progs)   # program yg belum pernah terlihat sebelumnya
+        self._fetched_at = datetime.datetime.now()
+        self._refreshing = False
+        self._save_cache()
         self.app.call_from_thread(self._render, errs)
+        if announce and self.new_keys and self.new_keys != prev_new:
+            self.app.call_from_thread(self._announce_new)
+    def _announce_new(self):
+        n = len(self.new_keys)
+        self.view = "baru"; self._render()          # FOKUS BARU: auto-pindah ke tab 🆕
+        self.notify(f"🔔 {n} program BARU ditemukan — tab 🆕", timeout=8)
     def _diff_seen(self, progs):
         prev = set()
         try: prev = set(json.load(open(SEEN, encoding="utf-8")))
@@ -2228,7 +2281,9 @@ class BBTUI(App):
             rk = t.add_row(self._icon(p), nm, p["platform"][:3], reward(p), str(len(p["wild"])),
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
-        stat = f"[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
+        refreshing = getattr(self, "_refreshing", False)
+        fresh = ("[yellow]\u21bb menyegarkan\u2026[/]" if refreshing else f"[dim]data: {self._fresh_label()}[/]")
+        stat = f"{fresh}\n[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
         allp = list(self.progs.values())
         nb = sum(1 for p in allp if p["key"] in self.new_keys and not self._st(p["key"]))
         nrev = sum(1 for p in allp if self._st(p["key"]) == "reviewed")
@@ -2466,7 +2521,7 @@ class BBTUI(App):
     def on_input_submitted(self, ev):
         if ev.input.id == "search":
             self.filter = ev.value.strip(); ev.input.remove_class("on"); self._render(); self.query_one("#tbl").focus()
-    def action_refresh(self): self.load()
+    def action_refresh(self): self.load(announce=True)
     def action_settings(self): self.push_screen(SettingsScreen(self.cfg))
 
 if __name__ == "__main__":
