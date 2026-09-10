@@ -752,7 +752,7 @@ class HelpScreen(ModalScreen):
                 "[b]WORKLIST[/] (status per program, TERSIMPAN antar sesi):\n"
                 "  Kolom [b]S[/]: 🆕 baru  ·  [dim].[/] belum ditinjau  ·  👁 ditinjau  ·  🎯 dikerjakan  ·  🔕 skip\n"
                 "  [yellow]v[/] 👁 ditinjau   [yellow]k[/] 🎯 dikerjakan   [yellow].[/] 🔕 skip (tekan lagi=kembalikan)   [yellow]Enter[/] buka=👁\n"
-                "  [b]KLIK KANAN[/] baris = menu pindah worklist (ditinjau/kerja/skip/belum + recon/llm)\n"
+                "  [b]Enter[/] atau [b]Space[/] = MENU pindah worklist (ditinjau/kerja/skip/belum + recon/llm). Klik-kanan juga bila terminal izinkan.\n"
                 "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto 🎯\n\n"
                 "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
                 "  aset niche (android/ios/api) + unmanaged + program kurang 'dioptimalkan'. Makin tinggi = makin\n"
@@ -2038,8 +2038,10 @@ class ContextMenuScreen(ModalScreen):
         box = OptionList(id="ctxlist")
         yield box
     def on_mount(self):
+        from rich.markup import escape
         from textual.widgets.option_list import Option
         box = self.query_one("#ctxlist", OptionList)
+        box.border_title = "\u2192 " + escape((self.pr.get("name") or "program")[:28])
         curst = self._cur()
         for act, label in self.ACTIONS:
             if act == "_sep":
@@ -2047,12 +2049,15 @@ class ContextMenuScreen(ModalScreen):
             mark = "[green]\u2713[/] " if act == curst or (act == "belum" and not curst) else "  "
             box.add_option(Option(mark + label, id=act))
         box.highlighted = 0
-        # posisikan dekat kursor (klik), dijepit ke dalam layar
+        w, h = 34, len(self.ACTIONS) + 3
         try:
-            x, y = self.xy
-            w, h = 34, len(self.ACTIONS) + 2
-            x = max(0, min(int(x), self.app.size.width - w))
-            y = max(0, min(int(y), self.app.size.height - h))
+            if self.xy:                                  # dekat kursor (klik kanan)
+                x, y = self.xy
+                x = max(0, min(int(x), self.app.size.width - w))
+                y = max(0, min(int(y), self.app.size.height - h))
+            else:                                        # dipicu tombol -> tengah layar
+                x = max(0, (self.app.size.width - w) // 2)
+                y = max(1, (self.app.size.height - h) // 2)
             box.styles.offset = (x, y)
         except Exception:
             pass
@@ -2215,6 +2220,7 @@ class BBTUI(App):
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
                 ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("k", "mark_working", "kerja"), ("full_stop", "toggle_skip", "skip"),
+                ("space", "ctx_menu", "menu"),
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
                 ("escape", "clear_search", "")]   # redraw & mode-salin tak lagi di footer: glitch-nya sudah beres, salin cukup Ctrl+C. Sisa lewat /redraw dan /mouse.
     VIEWS = ["all", "baru", "belum", "ditinjau", "kerja", "skip"]
@@ -2483,12 +2489,12 @@ class BBTUI(App):
         elif act == "llm":
             self._mark_working(pr); self.push_screen(LlmChatScreen(self.cfg, target=pr))
     def on_data_table_row_selected(self, ev):
-        # ENTER = buka program dgn sengaja -> AUTO 👁 ditinjau (scroll biasa TIDAK menandai).
+        # ENTER pada baris -> buka MENU worklist (andal; klik-kanan sering ditelan terminal)
         pr = self.rowmap.get(ev.row_key)
-        if not pr or self._st(pr["key"]): return
-        self._set_st(pr["key"], "reviewed")
-        try: self.query_one("#tbl", DataTable).update_cell(ev.row_key, "S", self._icon(pr))
-        except Exception: pass
+        if pr: self.push_screen(ContextMenuScreen(pr, None, self._ctx_action))
+    def action_ctx_menu(self):
+        pr = self._selected()
+        if pr: self.push_screen(ContextMenuScreen(pr, None, self._ctx_action))
     def on_data_table_row_highlighted(self, ev):
         pr = self.rowmap.get(ev.row_key)
         if not pr: return
@@ -2504,8 +2510,8 @@ class BBTUI(App):
               f"\n\n[b]Aset in-scope ({len(others)}):[/]\n" + ("\n".join('  ' + s for s in others[:40]) or '  -') +
               (f"\n  ... +{len(others)-40} lagi" if len(others) > 40 else "") +
               "\n\n[b]AKSI:[/] [yellow]e[/]=recon - [yellow]m[/]=monitor - [yellow]d[/]=dedup - [yellow]l[/]=llm-agent"
-              "\n[b]WORKLIST:[/] [yellow]v[/]=👁 - [yellow]k[/]=🎯 - [yellow].[/]=🔕 skip - [yellow]f[/]=view - atau [b]KLIK KANAN[/] baris utk menu"
-              "\n[dim]recon/monitor/llm otomatis menandai 🎯 dikerjakan - ?=bantuan[/]")
+              "\n[b]WORKLIST:[/] [yellow]Enter[/]/[yellow]Space[/]=MENU pindah kategori - [yellow]v[/]=👁 [yellow]k[/]=🎯 [yellow].[/]=🔕 - [yellow]f[/]=view"
+              "\n[dim]recon/monitor/llm otomatis 🎯 - klik-kanan juga (bila terminal mengizinkan) - ?=bantuan[/]")
         self.query_one("#detail", Static).update(md)
     def _selected(self):
         t = self.query_one("#tbl", DataTable)
