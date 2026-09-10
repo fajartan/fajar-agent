@@ -752,7 +752,7 @@ class HelpScreen(ModalScreen):
                 "[b]WORKLIST[/] (status per program, TERSIMPAN antar sesi):\n"
                 "  Kolom [b]S[/]: 🆕 baru  ·  [dim].[/] belum ditinjau  ·  👁 ditinjau  ·  🎯 dikerjakan  ·  🔕 skip\n"
                 "  [yellow]v[/] 👁 ditinjau   [yellow]k[/] 🎯 dikerjakan   [yellow].[/] 🔕 skip (tekan lagi=kembalikan)   [yellow]Enter[/] buka=👁\n"
-                "  [yellow]Space[/] pilih (MULTI) - [yellow]a[/] pilih semua - [yellow]Enter[/] buka MENU (aksi ke semua terpilih) - [yellow]esc[/] batal pilih\n"
+                "  [b]SOROT MOUSE[/] (klik+drag) atau [yellow]Space[/] = pilih MULTI - [yellow]a[/] semua - [yellow]Enter[/] MENU (ke semua terpilih) - [yellow]esc[/] batal\n"
                 "  [dim]MENU: ditinjau/kerja/skip/belum + recon/llm. Klik-kanan juga bila terminal izinkan; klik luar menu = tutup.\n"
                 "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto 🎯\n\n"
                 "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
@@ -2508,10 +2508,70 @@ class BBTUI(App):
             if act == "recon": self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
             else: self.push_screen(LlmChatScreen(self.cfg, target=pr))
     def on_data_table_row_selected(self, ev):
-        # ENTER pada baris -> buka MENU worklist (aksi ke SEMUA yg terpilih bila ada)
+        # RowSelected muncul utk KLIK mouse DAN Enter. Klik ditangani drag-select ->
+        # buka menu HANYA bila dipicu Enter keyboard (tak ada mouse-down barusan).
+        last = getattr(self, "_last_mouse", None)
+        if last and (datetime.datetime.now() - last).total_seconds() < 0.4:
+            return
         pr = self.rowmap.get(ev.row_key)
         prs = self._menu_targets(pr)
         if prs: self.push_screen(ContextMenuScreen(prs, None, self._ctx_action))
+    # ---------- SELEKSI MOUSE: klik = 1, drag = rentang ----------
+    def _hover_row(self, t):
+        try:
+            c = t.hover_coordinate
+            r = c.row if hasattr(c, "row") else c[0]
+            return r if (r is not None and r >= 0) else None
+        except Exception:
+            return None
+    def _apply_drag_range(self, t, a, b):
+        from textual.coordinate import Coordinate
+        from rich.text import Text
+        lo, hi = (a, b) if a <= b else (b, a)
+        newsel = set()
+        for r in range(lo, hi + 1):
+            try:
+                rk = t.coordinate_to_cell_key(Coordinate(r, 0)).row_key
+                pr = self.rowmap.get(rk)
+                if pr: newsel.add(pr["key"])
+            except Exception:
+                pass
+        if newsel == self.selected_keys:
+            return
+        self.selected_keys = newsel
+        for rk, pr in list(self.rowmap.items()):        # highlight ulang baris tampil
+            nm = (pr["name"] or "-")[:32]
+            cell = Text.from_markup(f"[black on yellow]{nm}[/]") if pr["key"] in self.selected_keys else Text(nm)
+            try: t.update_cell(rk, "Program", cell)
+            except Exception: pass
+    def on_mouse_down(self, ev):
+        if getattr(ev, "button", 0) != 1: return       # kiri saja (kanan = menu)
+        try: t = self.query_one("#tbl", DataTable)
+        except Exception: return
+        self._last_mouse = datetime.datetime.now()
+        row = self._hover_row(t)
+        if row is None: return
+        self._drag_anchor = row; self._dragging = True
+        try: t.capture_mouse()
+        except Exception: pass
+        self.selected_keys = set()                     # klik = mulai seleksi baru
+        self._apply_drag_range(t, row, row)
+    def on_mouse_move(self, ev):
+        if not getattr(self, "_dragging", False): return
+        try: t = self.query_one("#tbl", DataTable)
+        except Exception: return
+        row = self._hover_row(t)
+        if row is None: return
+        self._apply_drag_range(t, getattr(self, "_drag_anchor", row), row)
+    def on_mouse_up(self, ev):
+        if not getattr(self, "_dragging", False): return
+        self._dragging = False
+        self._last_mouse = datetime.datetime.now()
+        try: self.query_one("#tbl", DataTable).release_mouse()
+        except Exception: pass
+        n = len(self.selected_keys)
+        if n: self.notify(f"{n} program terpilih (Enter=menu · esc=batal)", timeout=3)
+        self._render()
     def _menu_targets(self, pr):
         if self.selected_keys:
             prs = [self.progs[k] for k in self.selected_keys if k in self.progs]
