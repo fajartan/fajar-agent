@@ -1386,7 +1386,9 @@ def _md_line(raw):
         # URL -> link clickable (Ctrl+Click buka browser di terminal yg dukung)
         # nilai link WAJIB dikutip: markup Textual menolak nilai tak berkutip yang
         # memuat ':' dan '/' -> MarkupError, sehingga tiap jawaban ber-URL bikin crash.
-        s = _re.sub(r"(https?://[^\s\]\)>'\"]+)", r"[link='\1'][u cyan]\1[/u cyan][/link]", s)
+        # Char class WAJIB kecualikan '\' dan '[' juga: teks sudah di-escape (mis. '['->'\['),
+        # kalau '\[' ikut tertangkap ke URL, markup [link='...\[...'] jadi rusak -> crash.
+        s = _re.sub(r"(https?://[^\s\[\]\)>'\"\\]+)", r"[link='\1'][u cyan]\1[/u cyan][/link]", s)
         return s
     if hashes and st[hashes:hashes + 1] == " ":            # heading -> tebal polos (tenang), tanpa '#'
         return "[b]" + inline(escape(st[hashes:].strip())) + "[/]"
@@ -1395,18 +1397,50 @@ def _md_line(raw):
     body = _re.sub(r"^(\s*)[-*]\s+", r"\1* ", body)
     return inline(body)
 
+def _markup_ok(s):
+    """True bila string markup bisa diparse Textual. Dipakai utk menjaga log tak crash."""
+    try:
+        from textual.content import Content
+        Content.from_markup(s); return True
+    except Exception:
+        return False
+
 class SelectableLog(Static):
     """Kotak chat yg BISA DISELEKSI. Static hanya bisa diseleksi jika kontennya SATU markup string
     (bukan Group/Panel/Table). Jadi semua ditumpuk jadi satu string markup. auto-scroll ke bawah."""
     ALLOW_SELECT = True
+    CAP = 600                                    # batas riwayat layar (biaya render ~linear thd ini)
     def __init__(self, *a, **k):
-        super().__init__(*a, **k); self._lines = []; self._batching = False
+        super().__init__(*a, **k); self._lines = []; self._batching = False; self._pending = False
     def write(self, s=""):
-        self._lines.append(s if isinstance(s, str) else str(s))
-        if len(self._lines) > 800: self._lines = self._lines[-800:]
-        if not self._batching: self._flush()
+        s = s if isinstance(s, str) else str(s)
+        # SAFETY: satu baris markup rusak (mis. URL/tag agent yg tak valid) TAK BOLEH
+        # membunuh TUI. Validasi dulu; kalau rusak -> escape (tampil apa adanya), bukan crash.
+        if not _markup_ok(s):
+            from rich.markup import escape
+            s = escape(s)
+        self._lines.append(s)
+        if len(self._lines) > self.CAP: self._lines = self._lines[-self.CAP:]
+        if not self._batching: self._schedule()
+    def _schedule(self):
+        # PERF: render ulang mem-parse SELURUH markup buffer (mahal saat panjang: ~50ms/800 baris).
+        # Tulis beruntun (balasan agent + hasil tool) di-COALESCE jadi SATU render per frame,
+        # bukan satu render per baris (dulu O(n^2): 800 baris = ~22 dtk). call_after_refresh
+        # menggabungkan semua write dalam satu siklus refresh.
+        if self._pending: return
+        self._pending = True
+        try: self.call_after_refresh(self._coalesced)
+        except Exception: self._pending = False; self._flush()
+    def _coalesced(self):
+        self._pending = False; self._flush()
     def _flush(self):
-        self.update("\n".join(self._lines))
+        joined = "\n".join(self._lines)
+        try:
+            self.update(joined)                       # jalur normal (markup sudah divalidasi di write)
+        except Exception:
+            from rich.markup import escape             # jaring pengaman terakhir: JANGAN pernah crash
+            try: self.update(escape(joined))
+            except Exception: pass
         try: self.parent.scroll_end(animate=False)
         except Exception: pass
     def batch(self):
@@ -1417,7 +1451,7 @@ class SelectableLog(Static):
             def __exit__(s, *a): log._batching = False; log._flush()
         return _Ctx()
     def clear(self):
-        self._lines = []; self.update("")
+        self._lines = []; self._pending = False; self.update("")
 
 class ChatBox(TextArea):
     """Kotak chat MULTI-BARIS, tinggi TETAP (rigid), gulir internal.
@@ -1569,7 +1603,9 @@ class LlmChatScreen(ModalScreen):
         self.query_one("#chathdr", Static).update(self._headerline())
         self.query_one("#chatstatus", Static).update(self._statusline())
     def _tick(self):
-        self._refresh_bars()
+        # PERF: dulu tiap 0.7s SELALU render ulang header+status walau idle. Sekarang:
+        # saat SIBUK animasi+status gerak tiap tick; saat IDLE cukup jarang (uptime) &
+        # animasi dibersihkan SEKALI saat transisi -> tak ada repaint sia-sia tiap tick.
         try:
             wrap = self.query_one("#thinkwrap")
             lbl = self.query_one("#thinklbl", Static); bar = self.query_one("#thinkbar", Static)
@@ -1579,8 +1615,8 @@ class LlmChatScreen(ModalScreen):
             want = "error" if self.busy else "default"
             if btn.variant != want: btn.variant = want
         except Exception: pass
+        self._tk += 1
         if self.busy:
-            self._tk += 1
             kao = self.THINK_KAO[self._tk % len(self.THINK_KAO)]
             word = self.THINK_WORD[(self._tk // 2) % len(self.THINK_WORD)]
             lbl.update(f"[yellow]{kao}[/] [dim italic]{word}[/]")   # kaomoji + kata + bar di sebelah
@@ -1588,10 +1624,12 @@ class LlmChatScreen(ModalScreen):
             n, blk, pos = 14, 3, self._tk % 14
             cells = "".join("█" if any((pos + i) % n == j for i in range(blk)) else "░" for j in range(n))
             bar.update(f"[dim]\\[{cells}][/dim]")   # \[ = kurung buka LITERAL (bukan tag); ] lone = literal
-            wrap.add_class("on")
+            if not getattr(self, "_anim_on", False): wrap.add_class("on"); self._anim_on = True
+            self._refresh_bars()                       # jam/token bergerak saat sibuk
         else:
-            bar.update("")              # bar diam total saat idle: tak ada animasi/repaint
-            wrap.remove_class("on")
+            if getattr(self, "_anim_on", False):       # transisi sibuk->idle: bersihkan SEKALI
+                bar.update(""); wrap.remove_class("on"); self._anim_on = False
+            if self._tk % 6 == 0: self._refresh_bars()  # idle: perbarui uptime tiap ~4s, bukan 0.7s
     def on_mount(self):
         log = self.query_one("#chatlog", SelectableLog)
         prov, model, _b, key = _llm_creds(self.cfg)
@@ -2137,6 +2175,9 @@ class LlmChatScreen(ModalScreen):
         dash = max(0, W - cell_len(head) - 1)
         out = ["", "[%s]╭─[/] [b %s]%s[/] [%s]%s╮[/]" % (color, color, label, color, "─" * dash)]
         for ln in inner:
+            if ln and not _markup_ok(ln):             # 1 baris rusak -> escape baris ITU saja,
+                from rich.markup import escape         # bingkai & baris lain tetap ber-format
+                ln = escape(ln)
             out.append(("[%s]│[/] " % color) + ln if ln else "[%s]│[/]" % color)
         out.append("[%s]╰%s╯[/]" % (color, "─" * max(0, W - 2)))
         self.query_one("#chatlog", SelectableLog).write(chr(10).join(out))
@@ -2218,7 +2259,8 @@ class LlmChatScreen(ModalScreen):
             self.app.call_from_thread(log.write, f"[magenta]v konteks diringkas: ~{before} -> ~{self.ctx} tok.[/]")
             self.app.call_from_thread(self._refresh_bars)
         except (Exception, SystemExit) as e:
-            self.app.call_from_thread(log.write, f"[red]! gagal meringkas konteks: {e}[/]")
+            from rich.markup import escape as _e
+            self.app.call_from_thread(log.write, f"[red]! gagal meringkas konteks: {_e(str(e))}[/]")
     @work(thread=True)
     def _run_stage(self, text, prov, model, base, key):
         log = self.query_one("#chatlog", SelectableLog)
@@ -2252,8 +2294,11 @@ class LlmChatScreen(ModalScreen):
             self.messages.append({"role": "user", "content": text})
             la.agent_turn(self.messages, prov, model, key, base, emit, allow_gated=self.allow_gated, confirm=None, on_meta=set_meta)
         except (Exception, SystemExit) as e:
-            # SystemExit dari _http_json bukan turunan Exception -> harus disebut eksplisit
-            w(f"[red]! error: {e}[/]")
+            # SystemExit dari _http_json bukan turunan Exception -> harus disebut eksplisit.
+            # WAJIB escape: pesan error bisa memuat potongan markup (mis. '[/u cyan]') yg
+            # kalau ditulis mentah bikin log gagal parse -> dulu ini mer-crash TUI saat hunting.
+            from rich.markup import escape as _e
+            w(f"[red]! error: {_e(str(e))}[/]")
         finally:
             # SIMPAN DI finally: kalau agent_turn gagal (mis. API 503/timeout), pesan
             # user + hasil sebagian tetap tersimpan. Dulu save di jalur sukses saja,
