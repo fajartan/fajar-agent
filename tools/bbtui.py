@@ -2029,6 +2029,9 @@ class ContextMenuScreen(ModalScreen):
         ("belum",    "\u00b7 Kembalikan ke Belum"),
         ("_sep", "\u2500\u2500\u2500\u2500\u2500"),
         ("recon",    "\U0001f50e Recon"),
+        ("monitor",  "\U0001f4e1 Monitor"),
+        ("dedup",    "\U0001f501 Dedup"),
+        ("workspace","\U0001f4c1 Workspace"),
         ("llm",      "\U0001f916 LLM Agent"),
     ]
     def __init__(self, prs, xy, on_action):
@@ -2399,7 +2402,10 @@ class BBTUI(App):
         return new
     def _q(self, p): return quiet_score(p, p["key"] in self.new_keys)
     def _render(self, errs=None):
-        t = self.query_one("#tbl", DataTable); t.clear(); self.rowmap = {}
+        t = self.query_one("#tbl", DataTable)
+        try: _keep_row = t.cursor_coordinate.row   # ingat baris kursor -> tak lompat ke atas
+        except Exception: _keep_row = 0
+        t.clear(); self.rowmap = {}
         items = list(self.progs.values())
         mq = _num(self.cfg, "min_quiet")
         # private (diundang) tak ikut disaring skor quiet
@@ -2429,6 +2435,9 @@ class BBTUI(App):
             rk = t.add_row(self._icon(p), cell, p["platform"][:3], reward(p), str(len(p["wild"])),
                            str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
+        try:
+            if self.rowmap: t.move_cursor(row=max(0, min(_keep_row, len(self.rowmap) - 1)))
+        except Exception: pass
         refreshing = getattr(self, "_refreshing", False)
         fresh = ("[b yellow]menyegarkan data...[/]" if refreshing
                  else f"[green]tersimpan[/] [dim]{self._fresh_label()} - r=segar[/]")
@@ -2492,6 +2501,44 @@ class BBTUI(App):
         if not pr: return
         xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40), getattr(ev, "screen_y", None) or getattr(ev, "y", 10))
         self.push_screen(ContextMenuScreen(self._menu_targets(pr), xy, self._ctx_action))
+    def _tool_target(self, kind, pr):
+        if kind == "dedup":
+            return pr["key"].split("|", 1)[1] if (pr["platform"] == "hackerone" and "|" in pr["key"]) else (pr["url"] or apex(pr))
+        return apex(pr)
+    def _tool_cmd(self, kind, tgt):
+        if kind == "recon": return [sys.executable, _tool("recon.py"), tgt, "--profile", "passive"]
+        if kind == "monitor": return [sys.executable, _tool("asset-monitor.py"), tgt]
+        out = os.path.expanduser("~/bb-dedup-" + re.sub(r"\W", "_", tgt)[:40] + ".md")
+        return [sys.executable, _tool("dedup.py"), tgt, "--out", out]
+    @work(thread=True)
+    def _batch_tool(self, kind, prs):
+        n = len(prs)
+        for i, pr in enumerate(prs, 1):
+            tgt = self._tool_target(kind, pr)
+            if not tgt: continue
+            try:
+                subprocess.run(self._tool_cmd(kind, tgt), capture_output=True, timeout=1800)
+                self.app.call_from_thread(lambda i=i, tgt=tgt: self.notify(f"\u2713 {kind} {i}/{n}: {tgt}", timeout=3))
+            except Exception as e:
+                self.app.call_from_thread(lambda tgt=tgt, e=e: self.notify(f"\u2717 {kind} {tgt}: {str(e)[:50]}", severity="warning"))
+        self.app.call_from_thread(lambda: self.notify(f"\u2713 {kind} batch selesai ({n} target)", timeout=6))
+    def _make_workspace(self, pr):
+        if not pr: return False
+        name = re.sub(r"\W", "_", (pr["name"] or "target"))[:40]
+        cands = [os.path.join(SCRIPT_DIR, "..", "TARGET-WORKSPACE-TEMPLATE"), os.path.join(SCRIPT_DIR, "TARGET-WORKSPACE-TEMPLATE")]
+        tpl = next((c for c in cands if os.path.isdir(c)), None)
+        dest = os.path.expanduser(f"~/bb-workspaces/{name}")
+        try:
+            if not os.path.exists(dest):
+                if tpl: shutil.copytree(tpl, dest)
+                else: os.makedirs(dest, exist_ok=True)
+            with open(os.path.join(dest, "scope.md"), "a", encoding="utf-8") as fh:
+                fh.write(f"\n\n## Auto-seed (bbtui) -- {pr['name']} [{pr['platform']}] {pr['url']}\n"
+                         "### Wildcard\n" + "\n".join("- " + w for w in pr["wild"]) +
+                         "\n### Scope\n" + "\n".join("- " + str(sx) for sx in pr["scope"][:80]))
+            return True
+        except Exception:
+            return False
     def _ctx_action(self, prs, act):
         if not prs: return
         if act in ("reviewed", "working", "skip", "belum"):
@@ -2502,11 +2549,25 @@ class BBTUI(App):
                    "skip": "\U0001f515 di-skip", "belum": "\u00b7 belum"}[act]
             self.notify((f"{len(prs)} program -> " if len(prs) > 1 else (prs[0]["name"] or "") + " -> ") + lbl)
             self._render()
-        elif act in ("recon", "llm"):
-            pr = prs[0]   # aksi tunggal -> program pertama
-            self._mark_working(pr); self.selected_keys.clear()
-            if act == "recon": self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
-            else: self.push_screen(LlmChatScreen(self.cfg, target=pr))
+        elif act in ("recon", "monitor", "dedup"):
+            for pr in prs: self._mark_working(pr)
+            self.selected_keys.clear(); self._render()
+            if len(prs) == 1:
+                self.push_screen(ToolScreen(act, self._tool_target(act, prs[0])))   # 1 -> modal interaktif
+            else:
+                self.notify(f"\u21bb {act} batch: {len(prs)} target (latar, profil passive)...", timeout=5)
+                self._batch_tool(act, list(prs))                                    # banyak -> batch latar
+        elif act == "workspace":
+            made = sum(1 for pr in prs if self._make_workspace(pr))
+            self.selected_keys.clear(); self._render()
+            self.notify(f"\U0001f4c1 workspace dibuat/di-seed: {made} program")
+        elif act == "llm":
+            pr = prs[0]
+            for p in prs: self._mark_working(p)
+            self.selected_keys.clear()
+            if len(prs) > 1:
+                self.notify(f"LLM chat = 1 target: buka {pr['name']} ({len(prs)} ditandai \U0001f3af)", timeout=5)
+            self.push_screen(LlmChatScreen(self.cfg, target=pr))
     def on_data_table_row_selected(self, ev):
         # RowSelected muncul utk KLIK mouse DAN Enter. Klik ditangani drag-select ->
         # buka menu HANYA bila dipicu Enter keyboard (tak ada mouse-down barusan).
