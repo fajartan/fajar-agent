@@ -2312,8 +2312,21 @@ class BBTUI(App):
             return orig(x, *a, **k)
         drv.write = w
         self._trace_path = path
+    def _lean_mouse(self):
+        # PERF: mode 1003 (ANY_EVENT) membanjiri event tiap mouse bergerak walau tanpa
+        # tombol -> app berat. Turun ke 1002 (BUTTON_EVENT): motion HANYA saat tombol
+        # ditekan. Drag pakai META event (bukan hover) -> tetap jalan. Hover-highlight
+        # (tak dipakai) nonaktif. Diulang saat resize krn Textual bisa re-set 1003.
+        try:
+            drv = getattr(self, "_driver", None)
+            if drv: drv.write("\x1b[?1003l\x1b[?1002h"); drv.flush()
+        except Exception:
+            pass
+    def on_resize(self, ev):
+        self._lean_mouse()
     def on_mount(self):
         self._trace_on()
+        self._lean_mouse()
         t = self.query_one("#tbl", DataTable)
         t.add_columns("S", "Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
@@ -2575,6 +2588,14 @@ class BBTUI(App):
         pr = self.rowmap.get(ev.row_key)
         self._open_menu(self._menu_targets(pr))
     # ---------- SELEKSI MOUSE: klik = 1, drag = rentang ----------
+    def _ev_row(self, ev, t=None):
+        # baris dari META event (dibawa event walau tanpa hover) -> aman di mode 1002
+        try:
+            r = ev.style.meta.get("row")
+            if r is not None and r >= 0: return r
+        except Exception:
+            pass
+        return self._hover_row(t) if t is not None else None
     def _hover_row(self, t):
         try:
             c = t.hover_coordinate
@@ -2617,7 +2638,7 @@ class BBTUI(App):
         except Exception: return
         self._last_mouse = datetime.datetime.now()
         if b == 3:                                     # KLIK KANAN -> menu (on_click tak sampai App!)
-            row = self._hover_row(t)
+            row = self._ev_row(ev, t)
             pr = self._row_prog(t, row) if row is not None else None
             if pr:
                 xy = (getattr(ev, "screen_x", None) or getattr(ev, "x", 40),
@@ -2625,7 +2646,7 @@ class BBTUI(App):
                 self._open_menu(self._menu_targets(pr), xy)
             return
         if b != 1: return
-        row = self._hover_row(t)
+        row = self._ev_row(ev, t)
         if row is None: return
         self._drag_anchor = row; self._dragging = True
         try: t.capture_mouse()
@@ -2637,7 +2658,7 @@ class BBTUI(App):
         if isinstance(self.screen, ModalScreen): return
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
-        row = self._hover_row(t)
+        row = self._ev_row(ev, t)
         if row is None: return
         self._apply_drag_range(t, getattr(self, "_drag_anchor", row), row)
     def _release_mouse_safe(self):
