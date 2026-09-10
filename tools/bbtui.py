@@ -26,6 +26,7 @@ BASE = "https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/main/data
 DISCLOSE_URL = "https://raw.githubusercontent.com/disclose/diodb/master/program-list.json"  # 2400+ program independen/VDP/self-hosted
 CFG_DIR = os.path.expanduser("~/.config/bbtui"); CFG = os.path.join(CFG_DIR, "config.json")
 SEEN = os.path.join(CFG_DIR, "seen.json")  # baseline utk deteksi PROGRAM BARU antar sesi
+STATUS = os.path.join(CFG_DIR, "status.json")  # status worklist per program: reviewed/working/skip
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CFG = {"platforms": ["hackerone", "bugcrowd", "yeswehack", "intigriti", "federacy"],
                "require_wildcard": True, "min_bounty": 0, "asset_type": "", "mouse": True,
@@ -685,7 +686,11 @@ class HelpScreen(ModalScreen):
                 "[b cyan]FAJAR-AGENT -- Bantuan / Fitur[/]\n\n"
                 "[b]Navigasi[/]\n"
                 "  ^/v pindah baris   /  cari nama/scope   r  refresh   q  keluar   ?  bantuan\n"
-                "  [yellow]b[/] tampilkan HANYA program BARU (🆕)   [yellow]c[/] ganti urutan (platform->quiet->reward->assets)\n\n"
+                "  [yellow]b[/] view program BARU   [yellow]c[/] ganti urutan (platform->quiet->reward->assets)\n\n"
+                "[b]WORKLIST[/] (status per program, TERSIMPAN antar sesi):\n"
+                "  Kolom [b]S[/]: 🆕 baru  ·  [dim].[/] belum ditinjau  ·  👁 ditinjau  ·  🎯 dikerjakan  ·  🔕 skip\n"
+                "  [yellow]Enter[/]/[yellow]v[/] tandai 👁 ditinjau   [yellow].[/] skip 🔕 (disembunyikan; tekan . lagi utk kembalikan)\n"
+                "  [yellow]f[/] ganti view (semua/baru/belum/ditinjau/kerja/skip)   recon/monitor/llm auto-tandai 🎯\n\n"
                 "[b]Kolom Q = skor QUIET (anti-ramai, 0-100)[/] -- PROXY dari data nyata: baru + scope besar +\n"
                 "  aset niche (android/ios/api) + unmanaged + program kurang 'dioptimalkan'. Makin tinggi = makin\n"
                 "  mungkin sepi/minim-duplikat. [dim]Bukan hitungan hacker asli -- itu tak ada di data gratis.[/]\n\n"
@@ -2096,9 +2101,36 @@ class BBTUI(App):
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
                 ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
+                ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("full_stop", "toggle_skip", "skip"),
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
                 ("escape", "clear_search", "")]   # redraw & mode-salin tak lagi di footer: glitch-nya sudah beres, salin cukup Ctrl+C. Sisa lewat /redraw dan /mouse.
-    def __init__(self): super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}; self.filter = ""; self.new_keys = set(); self.only_new = False
+    VIEWS = ["all", "baru", "belum", "ditinjau", "kerja", "skip"]
+    VIEW_LABEL = {"all": "semua (skip disembunyikan)", "baru": "\U0001f195 baru", "belum": "belum ditinjau",
+                  "ditinjau": "\U0001f441 ditinjau", "kerja": "\U0001f3af dikerjakan", "skip": "\U0001f515 skip"}
+    def __init__(self):
+        super().__init__(); self.cfg = load_cfg(); self.progs = {}; self.rowmap = {}
+        self.filter = ""; self.new_keys = set(); self.only_new = False; self.view = "all"
+        self.status = self._load_status()
+    def _load_status(self):
+        try: return json.load(open(STATUS, encoding="utf-8"))
+        except Exception: return {}
+    def _save_status(self):
+        try:
+            os.makedirs(CFG_DIR, exist_ok=True)
+            json.dump(self.status, open(STATUS, "w", encoding="utf-8"))
+        except Exception: pass
+    def _st(self, key): return self.status.get(key, "")
+    def _set_st(self, key, val):
+        if val: self.status[key] = val
+        else: self.status.pop(key, None)
+        self._save_status()
+    def _icon(self, pr):
+        st = self._st(pr["key"])
+        if st == "skip": return "\U0001f515"
+        if st == "working": return "\U0001f3af"
+        if st == "reviewed": return "\U0001f441"
+        if pr["key"] in self.new_keys: return "\U0001f195"
+        return "\u00b7"
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True, icon="*")
         with Horizontal(id="body"):
@@ -2135,7 +2167,7 @@ class BBTUI(App):
     def on_mount(self):
         self._trace_on()
         t = self.query_one("#tbl", DataTable)
-        t.add_columns("Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
+        t.add_columns("S", "Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
         self.query_one("#tablewrap").border_title = "PROGRAMS"
         self.query_one("#detail").border_title = "DETAIL"
@@ -2167,8 +2199,14 @@ class BBTUI(App):
         mq = _num(self.cfg, "min_quiet")
         # private (diundang) tak ikut disaring skor quiet
         if mq: items = [p for p in items if self._q(p) >= mq or "PRIVATE" in str(p.get("signal", ""))]
-        if self.only_new:
-            items = [p for p in items if p["key"] in self.new_keys]
+        v = self.view
+        if v != "skip":
+            items = [p for p in items if self._st(p["key"]) != "skip"]   # skip disembunyikan di semua view lain
+        if v == "baru":       items = [p for p in items if p["key"] in self.new_keys]
+        elif v == "belum":    items = [p for p in items if not self._st(p["key"]) and p["key"] not in self.new_keys]
+        elif v == "ditinjau": items = [p for p in items if self._st(p["key"]) == "reviewed"]
+        elif v == "kerja":    items = [p for p in items if self._st(p["key"]) == "working"]
+        elif v == "skip":     items = [p for p in items if self._st(p["key"]) == "skip"]
         if self.filter:
             f = self.filter.lower()
             items = [p for p in items if f in (p["name"] or "").lower() or any(f in s.lower() for s in p["scope"])]
@@ -2180,15 +2218,22 @@ class BBTUI(App):
         per = {}
         for p in self.progs.values(): per[p["platform"]] = per.get(p["platform"], 0) + 1
         for p in items:
-            new = p["key"] in self.new_keys
-            nm = ("🆕 " + (p["name"] or "-"))[:32] if new else (p["name"] or "-")[:32]
-            rk = t.add_row(nm, p["platform"][:3], reward(p), str(len(p["wild"])), str(len(p["scope"])), p["maxsev"], str(self._q(p)))
+            nm = (p["name"] or "-")[:32]
+            rk = t.add_row(self._icon(p), nm, p["platform"][:3], reward(p), str(len(p["wild"])),
+                           str(len(p["scope"])), p["maxsev"], str(self._q(p)))
             self.rowmap[rk] = p
         stat = f"[b]Total:[/] {len(self.progs)}\n" + "\n".join(f"  {k}: {v}" for k, v in per.items())
-        nb = len(self.new_keys)
-        stat += f"\n\n[b {'green' if nb else 'dim'}]🆕 baru: {nb}[/]" + ("  [dim](b=hanya baru)[/]" if nb else "")
-        if self.only_new: stat += "\n[green]MODE: hanya program baru[/]"
-        stat += f"\n\n[b]tampil:[/] {len(items)}"
+        allp = list(self.progs.values())
+        nb = sum(1 for p in allp if p["key"] in self.new_keys and not self._st(p["key"]))
+        nrev = sum(1 for p in allp if self._st(p["key"]) == "reviewed")
+        nwork = sum(1 for p in allp if self._st(p["key"]) == "working")
+        nskip = sum(1 for p in allp if self._st(p["key"]) == "skip")
+        nbelum = sum(1 for p in allp if not self._st(p["key"]) and p["key"] not in self.new_keys)
+        stat += (f"\n\n[b]WORKLIST[/]\n"
+                 f"  [{'green' if nb else 'dim'}]🆕 baru {nb}[/]   [cyan]👁 ditinjau {nrev}[/]   [yellow]🎯 kerja {nwork}[/]\n"
+                 f"  [dim]· belum {nbelum}   🔕 skip {nskip}[/]")
+        stat += f"\n\n[b]view:[/] [green]{self.VIEW_LABEL.get(self.view, self.view)}[/] [dim](f=ganti · v=tinjau · .=skip)[/]"
+        stat += f"\n[b]tampil:[/] {len(items)}"
         if self.filter: stat += f"\n[yellow]filter: {self.filter}[/]"
         stat += f"\n[b]urut:[/] {self.cfg.get('sort','platform')} [dim](c=ubah)[/]"
         if mq: stat += f"\n[cyan]min-quiet: {int(mq)}[/]"
@@ -2202,6 +2247,13 @@ class BBTUI(App):
                 col = "green" if e.startswith("🔒") else ("yellow" if e[0] in "⚠" else "red")
                 stat += f"\n[{col}]{e}[/]"
         self.query_one("#stat", Static).update(stat)
+    def on_data_table_row_selected(self, ev):
+        # ENTER = buka program dgn sengaja -> AUTO 👁 ditinjau (scroll biasa TIDAK menandai).
+        pr = self.rowmap.get(ev.row_key)
+        if not pr or self._st(pr["key"]): return
+        self._set_st(pr["key"], "reviewed")
+        try: self.query_one("#tbl", DataTable).update_cell(ev.row_key, "S", self._icon(pr))
+        except Exception: pass
     def on_data_table_row_highlighted(self, ev):
         pr = self.rowmap.get(ev.row_key)
         if not pr: return
@@ -2216,17 +2268,39 @@ class BBTUI(App):
               f"[b]Wildcard ({len(pr['wild'])}):[/]\n" + ("\n".join('  ' + w for w in pr['wild']) or '  -') +
               f"\n\n[b]Aset in-scope ({len(others)}):[/]\n" + ("\n".join('  ' + s for s in others[:40]) or '  -') +
               (f"\n  ... +{len(others)-40} lagi" if len(others) > 40 else "") +
-              "\n\n[b]AKSI:[/] [yellow]e[/]=recon(extract web) - [yellow]m[/]=monitor subdomain - [yellow]d[/]=dedup"
-              "\n[dim]target terisi dari sini, tapi bisa diedit/ketik manual - ?=bantuan[/]")
+              "\n\n[b]AKSI:[/] [yellow]e[/]=recon - [yellow]m[/]=monitor - [yellow]d[/]=dedup - [yellow]l[/]=llm-agent"
+              "\n[b]WORKLIST:[/] [yellow]Enter/v[/]=👁 ditinjau - [yellow].[/]=🔕 skip - [yellow]f[/]=ganti view - [yellow]b[/]=baru"
+              "\n[dim]recon/monitor/llm otomatis menandai 🎯 dikerjakan - ?=bantuan[/]")
         self.query_one("#detail", Static).update(md)
     def _selected(self):
         t = self.query_one("#tbl", DataTable)
         try: return self.rowmap.get(t.coordinate_to_cell_key(t.cursor_coordinate).row_key)
         except Exception: return None
     def action_only_new(self):
-        if not self.new_keys and not self.only_new:
-            self.notify("belum ada program baru sejak sesi terakhir"); return
-        self.only_new = not self.only_new; self._render()
+        self.view = "all" if self.view == "baru" else "baru"; self._render()
+    def action_cycle_view(self):
+        i = self.VIEWS.index(self.view) if self.view in self.VIEWS else 0
+        self.view = self.VIEWS[(i + 1) % len(self.VIEWS)]
+        self.notify("view: " + self.VIEW_LABEL.get(self.view, self.view)); self._render()
+    def action_mark_reviewed(self):
+        pr = self._selected()
+        if not pr: return
+        cur = self._st(pr["key"])
+        self._set_st(pr["key"], "" if cur == "reviewed" else "reviewed")
+        self.notify(("\U0001f441 ditinjau: " if self._st(pr["key"]) else "\u00b7 kembali ke belum: ") + (pr["name"] or ""))
+        self._render()
+    def action_toggle_skip(self):
+        pr = self._selected()
+        if not pr: return
+        if self._st(pr["key"]) == "skip":
+            self._set_st(pr["key"], "")
+            self.notify("\u21a9 dikembalikan dari skip: " + (pr["name"] or ""))
+        else:
+            self._set_st(pr["key"], "skip")
+            self.notify("\U0001f515 di-skip (disembunyikan; view Skip [f] utk kembalikan): " + (pr["name"] or ""))
+        self._render()
+    def _mark_working(self, pr):
+        if pr and self._st(pr["key"]) != "skip": self._set_st(pr["key"], "working")
     def action_cycle_sort(self):
         order = ["platform", "quiet", "reward", "assets"]
         cur = str(self.cfg.get("sort", "platform"))
@@ -2321,11 +2395,11 @@ class BBTUI(App):
     def action_schedule(self):
         self.push_screen(SchedulerScreen())
     def action_llm(self):
-        self.push_screen(LlmChatScreen(self.cfg, target=self._selected()))
+        pr = self._selected(); self._mark_working(pr); self.push_screen(LlmChatScreen(self.cfg, target=pr))
     def action_recon(self):
-        pr = self._selected(); self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
+        pr = self._selected(); self._mark_working(pr); self.push_screen(ToolScreen("recon", apex(pr) if pr else ""))
     def action_monitor(self):
-        pr = self._selected(); self.push_screen(ToolScreen("monitor", apex(pr) if pr else ""))
+        pr = self._selected(); self._mark_working(pr); self.push_screen(ToolScreen("monitor", apex(pr) if pr else ""))
     def action_dedup(self):
         pr = self._selected()
         d = "" if not pr else (pr["key"].split("|", 1)[1] if (pr["platform"] == "hackerone" and "|" in pr["key"]) else (pr["url"] or apex(pr)))
