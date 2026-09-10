@@ -1409,14 +1409,14 @@ class SelectableLog(Static):
     """Kotak chat yg BISA DISELEKSI. Static hanya bisa diseleksi jika kontennya SATU markup string
     (bukan Group/Panel/Table). Jadi semua ditumpuk jadi satu string markup. auto-scroll ke bawah."""
     ALLOW_SELECT = True
-    CAP = 600                                    # batas riwayat layar (biaya render ~linear thd ini)
+    CAP = 260                                    # batas riwayat layar (biaya render TIAP flush ~linear thd ini)
     def __init__(self, *a, **k):
         super().__init__(*a, **k); self._lines = []; self._batching = False; self._pending = False
     def write(self, s=""):
         s = s if isinstance(s, str) else str(s)
-        # SAFETY: satu baris markup rusak (mis. URL/tag agent yg tak valid) TAK BOLEH
-        # membunuh TUI. Validasi dulu; kalau rusak -> escape (tampil apa adanya), bukan crash.
-        if not _markup_ok(s):
+        # SAFETY + PERF: baris tanpa '[' TAK MUNGKIN punya tag -> pasti valid, lewati parse.
+        # Baris ber-'[' divalidasi; kalau rusak -> escape (tampil apa adanya), tak crash.
+        if "[" in s and not _markup_ok(s):
             from rich.markup import escape
             s = escape(s)
         self._lines.append(s)
@@ -2175,8 +2175,8 @@ class LlmChatScreen(ModalScreen):
         dash = max(0, W - cell_len(head) - 1)
         out = ["", "[%s]╭─[/] [b %s]%s[/] [%s]%s╮[/]" % (color, color, label, color, "─" * dash)]
         for ln in inner:
-            if ln and not _markup_ok(ln):             # 1 baris rusak -> escape baris ITU saja,
-                from rich.markup import escape         # bingkai & baris lain tetap ber-format
+            if ln and "[" in ln and not _markup_ok(ln):  # 1 baris rusak -> escape baris ITU saja,
+                from rich.markup import escape            # bingkai & baris lain tetap ber-format
                 ln = escape(ln)
             out.append(("[%s]│[/] " % color) + ln if ln else "[%s]│[/]" % color)
         out.append("[%s]╰%s╯[/]" % (color, "─" * max(0, W - 2)))
@@ -2599,6 +2599,7 @@ class BBTUI(App):
         self._trace_path = path
     def on_mount(self):
         self._trace_on()
+        self._start_freeze_watch()          # FAJAR_FREEZE=1 -> rekam siapa nge-blok thread utama
         t = self.query_one("#tbl", DataTable)
         t.add_columns("S", "Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
@@ -2607,6 +2608,35 @@ class BBTUI(App):
         self._boot()
         self.set_focus(t)   # penting: fokus ke tabel, bukan ke kotak search
         self.push_screen(SplashScreen())   # banner pembuka (sekalian nutup loading)
+    def _beat(self):
+        import time as _t; self._hb = _t.monotonic()
+    def _start_freeze_watch(self):
+        # Detektor freeze OPSIONAL (aktif hanya bila env FAJAR_FREEZE di-set). Thread
+        # penjaga mengambil STACK thread utama saat heartbeat telat -> tahu PERSIS fungsi
+        # apa yg nge-blok UI. Tanpa env: nol overhead (tak ada interval/thread tambahan).
+        if not os.environ.get("FAJAR_FREEZE"):
+            return
+        import time as _t, threading, sys as _s, traceback
+        self._hb = _t.monotonic(); self._freeze_seen = 0.0
+        main_id = threading.get_ident()
+        self.set_interval(0.15, self._beat)          # heartbeat thread utama
+        logp = os.path.expanduser("~/fajar-freeze.log")
+        def watch():
+            while not getattr(self, "_stop_watch", False):
+                _t.sleep(0.15)
+                gap = _t.monotonic() - getattr(self, "_hb", _t.monotonic())
+                if gap > 0.4 and self._hb != self._freeze_seen:
+                    self._freeze_seen = self._hb
+                    try:
+                        fr = _s._current_frames().get(main_id)
+                        stk = "".join(traceback.format_stack(fr)) if fr else "(no frame)"
+                        with open(logp, "a", encoding="utf-8") as f:
+                            f.write(f"\n=== FREEZE ~{gap*1000:.0f}ms @ {datetime.datetime.now().isoformat()} ===\n{stk}\n")
+                    except Exception:
+                        pass
+        threading.Thread(target=watch, daemon=True).start()
+    def on_unmount(self):
+        self._stop_watch = True
     def _save_cache(self):
         try:
             os.makedirs(CFG_DIR, exist_ok=True)
