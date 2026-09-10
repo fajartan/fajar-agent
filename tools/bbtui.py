@@ -12,7 +12,7 @@ import json, os, re, sys, base64, shlex, shutil, datetime, subprocess, urllib.re
 try:
     from textual.app import App, ComposeResult
     from textual.containers import Horizontal, Vertical, VerticalScroll, Center, Middle
-    from textual.widgets import (Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar, TextArea, Switch, Select)
+    from textual.widgets import (Header, Footer, DataTable, Static, Input, RichLog, Label, Button, OptionList, ProgressBar, TextArea, Switch, Select, Tabs, Tab)
     from textual.message import Message
     from textual.widgets.option_list import Option
     from textual.screen import ModalScreen
@@ -620,6 +620,7 @@ Screen { layout: vertical; background: $surface; }
 #side { width: 32; padding: 1; border: round $primary; margin: 0 1 0 0; scrollbar-size: 0 0; }
 #stat { height: auto; }
 #tablewrap { width: 2fr; border: round $primary; }
+#cattabs { height: 1; background: $surface; margin: 0 0 1 0; }
 #detail { width: 1fr; border: round $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
 DataTable { height: 1fr; background: $surface; scrollbar-size: 0 0; }
 DataTable > .datatable--header { text-style: bold; background: $primary; }
@@ -2138,6 +2139,11 @@ class BBTUI(App):
                 yield Static("memuat...", id="stat")
                 yield Static("[b]Filter platform[/b]\n[dim]ketik / untuk cari nama/scope[/]", classes="title")
             with Vertical(id="tablewrap"):
+                yield Tabs(
+                    Tab("semua", id="tab-all"), Tab("\U0001f195 baru", id="tab-baru"),
+                    Tab("\u00b7 belum", id="tab-belum"), Tab("\U0001f441 ditinjau", id="tab-ditinjau"),
+                    Tab("\U0001f3af kerja", id="tab-kerja"), Tab("\U0001f515 skip", id="tab-skip"),
+                    id="cattabs")
                 yield DataTable(id="tbl", cursor_type="row", zebra_stripes=True)
             yield VerticalScroll(Static("pilih program ->", id="detail"))
         yield Input(placeholder="cari nama/scope... (enter)", id="search")
@@ -2232,8 +2238,18 @@ class BBTUI(App):
         stat += (f"\n\n[b]WORKLIST[/]\n"
                  f"  [{'green' if nb else 'dim'}]🆕 baru {nb}[/]   [cyan]👁 ditinjau {nrev}[/]   [yellow]🎯 kerja {nwork}[/]\n"
                  f"  [dim]· belum {nbelum}   🔕 skip {nskip}[/]")
-        stat += f"\n\n[b]view:[/] [green]{self.VIEW_LABEL.get(self.view, self.view)}[/] [dim](f=ganti · v=tinjau · .=skip)[/]"
-        stat += f"\n[b]tampil:[/] {len(items)}"
+        stat += f"\n[b]tampil:[/] {len(items)}  [dim](tab/f=ganti kategori · v=tinjau · .=skip)[/]"
+        # perbarui label tab dgn jumlah + aktifkan tab sesuai view
+        try:
+            counts = {"all": len(allp) - nskip, "baru": nb, "belum": nbelum,
+                      "ditinjau": nrev, "kerja": nwork, "skip": nskip}
+            base = {"all": "semua", "baru": "\U0001f195 baru", "belum": "\u00b7 belum",
+                    "ditinjau": "\U0001f441 ditinjau", "kerja": "\U0001f3af kerja", "skip": "\U0001f515 skip"}
+            tabs = self.query_one("#cattabs", Tabs)
+            for kk, lbl in base.items():
+                tabs.query_one("#tab-" + kk, Tab).label = f"{lbl} {counts[kk]}"
+            self._sync_tab()
+        except Exception: pass
         if self.filter: stat += f"\n[yellow]filter: {self.filter}[/]"
         stat += f"\n[b]urut:[/] {self.cfg.get('sort','platform')} [dim](c=ubah)[/]"
         if mq: stat += f"\n[cyan]min-quiet: {int(mq)}[/]"
@@ -2247,6 +2263,17 @@ class BBTUI(App):
                 col = "green" if e.startswith("🔒") else ("yellow" if e[0] in "⚠" else "red")
                 stat += f"\n[{col}]{e}[/]"
         self.query_one("#stat", Static).update(stat)
+    def on_tabs_tab_activated(self, ev):
+        if ev.tabs.id != "cattabs": return
+        want = (ev.tab.id or "tab-all").replace("tab-", "")
+        if want != self.view:
+            self.view = want; self._render()
+    def _sync_tab(self):
+        try:
+            tabs = self.query_one("#cattabs", Tabs)
+            tid = "tab-" + self.view
+            if tabs.active != tid: tabs.active = tid
+        except Exception: pass
     def on_data_table_row_selected(self, ev):
         # ENTER = buka program dgn sengaja -> AUTO 👁 ditinjau (scroll biasa TIDAK menandai).
         pr = self.rowmap.get(ev.row_key)
