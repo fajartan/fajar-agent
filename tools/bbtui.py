@@ -681,7 +681,7 @@ Screen { layout: vertical; background: $surface; }
 #tablewrap { width: 2fr; border: round $primary; }
 #cattabs { height: 1; background: $surface; margin: 0 0 1 0; }
 #detail { width: 1fr; border: round $accent; padding: 1; margin: 0 0 0 1; scrollbar-size: 0 0; }
-DataTable { height: 1fr; background: $surface; scrollbar-size: 0 0; }
+DataTable { height: 1fr; background: $surface; scrollbar-size-vertical: 2; scrollbar-background: $panel; scrollbar-color: $accent; scrollbar-color-hover: $warning; scrollbar-color-active: $warning; }
 DataTable > .datatable--header { text-style: bold; background: $primary; }
 DataTable > .datatable--cursor { background: $accent; color: $text; text-style: bold; }
 #search { dock: bottom; display: none; border: round $accent; }
