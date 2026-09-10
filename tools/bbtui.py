@@ -260,6 +260,113 @@ def passes(pr, cfg):
         if isinstance(v, (int, float)) and v > _num(cfg, "max_ttb"): return False
     return True
 
+def _api_test_one(name, fn):
+    """Jalankan satu tes, seragamkan hasil -> (nama, status, detail)."""
+    try:
+        ok, detail = fn()
+        return (name, "OK" if ok else "GAGAL", detail)
+    except SystemExit as e:
+        return (name, "GAGAL", str(e)[:120])
+    except Exception as e:
+        return (name, "GAGAL", f"{type(e).__name__}: {e}"[:120])
+
+def api_test_all(cfg):
+    """Tes tiap API key yang DIISI. Return list (nama, status, detail).
+
+    status: OK (jalan) / GAGAL (error) / '-' (dilewati: kosong atau belum aktif).
+    Request minimal & read-only. Baca nilai dari cfg (yg sudah diisi live sebelum tes).
+    """
+    res = []
+
+    # --- HackerOne (user + token) ---
+    u, t = cfg.get("h1_api_user"), cfg.get("h1_api_token")
+    if t and not u:
+        res.append(("HackerOne", "GAGAL", "h1_api_user KOSONG (isi username H1, bukan email)"))
+    elif u and not t:
+        res.append(("HackerOne", "GAGAL", "token kosong"))
+    elif u and t:
+        def _h1():
+            hdr = _h1_auth_hdr(cfg)
+            d = json.loads(_get("https://api.hackerone.com/v1/hackers/programs?page%5Bsize%5D=1", headers=hdr, timeout=25))
+            n = len(d.get("data", []))
+            return True, f"auth OK — akses {('>=1 program' if n else '0 program (belum di-invite?)')}"
+        res.append(_api_test_one("HackerOne", _h1))
+    else:
+        res.append(("HackerOne", "-", "kosong"))
+
+    # --- Intigriti ---
+    it = cfg.get("intigriti_api_token")
+    if it:
+        def _it():
+            d = json.loads(_get("https://api.intigriti.com/external/researcher/v1/programs?limit=1", headers=_bearer(it), timeout=25))
+            items = d if isinstance(d, list) else (d.get("records") or d.get("data") or d.get("items") or [])
+            return True, f"token OK — {len(items)} program terlihat"
+        res.append(_api_test_one("Intigriti", _it))
+    else:
+        res.append(("Intigriti", "-", "kosong"))
+
+    # --- YesWeHack ---
+    yw = cfg.get("yeswehack_api_token")
+    if yw:
+        def _yw():
+            d = json.loads(_get("https://api.yeswehack.com/programs?limit=1", headers=_bearer(yw), timeout=25))
+            n = len(d.get("items") or [])
+            return True, f"token OK — {n} program terlihat"
+        res.append(_api_test_one("YesWeHack", _yw))
+    else:
+        res.append(("YesWeHack", "-", "kosong"))
+
+    # --- LLM (provider+model+key+base) ---
+    prov, model, base, key = _llm_creds(cfg)
+    if key:
+        def _llm():
+            models = _llm_mod().fetch_models(prov, key, base)
+            if models and not str(models[0]).startswith("["):
+                hit = "model cocok" if any(model in str(m) for m in models) else f"model '{model}' TAK ada di daftar"
+                return True, f"{prov} OK — {len(models)} model ({hit})"
+            return False, str(models[0] if models else "tak ada model")
+        res.append(_api_test_one(f"LLM ({prov})", _llm))
+    else:
+        res.append(("LLM", "-", "llm_api_key kosong"))
+
+    # --- Firecrawl (dipakai /recon deep) ---
+    fc = cfg.get("firecrawl_api_key")
+    if fc:
+        def _fc():
+            # /v1/map endpoint ringan; 200/402 tetap berarti auth diterima
+            try:
+                _get("https://api.firecrawl.dev/v1/team/credit-usage",
+                     headers={"Authorization": "Bearer " + fc}, timeout=20)
+                return True, "token OK (kredit terbaca)"
+            except urllib.error.HTTPError as e:
+                if e.code in (200, 402):
+                    return True, "token OK"
+                if e.code in (401, 403):
+                    return False, f"ditolak ({e.code})"
+                return True, f"token diterima (HTTP {e.code})"
+        res.append(_api_test_one("Firecrawl", _fc))
+    else:
+        res.append(("Firecrawl", "-", "kosong (opsional; utk /recon deep)"))
+
+    # --- Telegram bot ---
+    tg = cfg.get("telegram_token")
+    if tg:
+        def _tg():
+            d = json.loads(_get(f"https://api.telegram.org/bot{tg}/getMe", timeout=20))
+            if d.get("ok"):
+                return True, "bot @" + str((d.get("result") or {}).get("username", "?"))
+            return False, str(d.get("description", "ditolak"))
+        res.append(_api_test_one("Telegram", _tg))
+    else:
+        res.append(("Telegram", "-", "kosong"))
+
+    # --- catatan yang BELUM aktif ---
+    if cfg.get("bugcrowd_api_token"):
+        res.append(("Bugcrowd", "-", "disimpan tapi BELUM aktif (tak ada fetch)"))
+    if cfg.get("serper_api_key"):
+        res.append(("Serper", "-", "disimpan tapi BELUM aktif (enrich belum dipanggil)"))
+    return res
+
 def _h1_auth_hdr(cfg):
     u = cfg.get("h1_api_user"); t = cfg.get("h1_api_token")
     if not u or not t: return None
@@ -510,6 +617,8 @@ ModalScreen #stat { width: 84; max-height: 90%; border: round $accent; padding: 
 ModalScreen #stat Label { width: 100%; }
 ModalScreen #stat Static { width: 100%; }
 #stat Horizontal { height: auto; align: left middle; margin: 1 0; }
+.setbtns { height: auto; margin: 1 0; }
+#apires { height: auto; margin: 1 0; padding: 0 1; }
 Button { height: 3; width: auto; min-width: 16; margin: 0 2 0 0; border: round $primary; }
 #chatwrap { width: 100%; height: 100%; border: round $accent; background: $surface; layers: base pop; }
 #chathdr { height: 1; background: $accent; color: $text; text-style: bold; padding: 0 1; }
@@ -583,11 +692,15 @@ class HelpScreen(ModalScreen):
     def action_dummy(self): pass
 
 class SettingsScreen(ModalScreen):
-    BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+s", "save", "simpan")]
+    BINDINGS = [("escape", "app.pop_screen", "tutup"), ("ctrl+s", "save", "simpan"), ("ctrl+t", "test_api", "test API")]
     def __init__(self, cfg): super().__init__(); self.cfg = cfg
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="stat"):
-            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] atau tombol Simpan = simpan - Enter di field = simpan - esc = batal TANPA simpan)", classes="title")
+            yield Label("[b cyan]SETTINGS[/]  ([b]Ctrl+S[/] simpan - [b]Ctrl+T[/] test semua API - esc batal)", classes="title")
+            with Horizontal(classes="setbtns"):
+                yield Button("🔌 Test API", id="btntest", variant="primary")
+                yield Button("💾 Simpan", id="btnsave", variant="success")
+            yield Static("", id="apires")
             yield Label("\n[b yellow]-- KRITERIA PENCARIAN --[/]")
             yield Label("Platform (6 sumber OTONOM, pisah koma): hackerone, bugcrowd, yeswehack, intigriti, federacy, disclose")
             yield Label("[dim]disclose = 2400+ program independen/VDP (matikan 'wajib wildcard' utk lihat). Program PRIVATE H1 otomatis ikut bila h1 token diisi (🔒).[/]")
@@ -665,6 +778,40 @@ class SettingsScreen(ModalScreen):
             yield Label("[dim]Tool eksternal (hermes/neurosploit/nuclei): tekan x di layar utama untuk kelola.[/]")
             yield Label("\n[b green]> SIMPAN: tekan Ctrl+S  (atau Enter di kotak isian mana pun)[/]  -  [dim]esc = batal tanpa simpan[/]")
     def on_input_submitted(self, _): self.action_save()
+    def on_button_pressed(self, ev):
+        if ev.button.id == "btnsave": self.action_save()
+        elif ev.button.id == "btntest": self.action_test_api()
+    def _cfg_live(self):
+        """Salin cfg dgn nilai TERKINI dari field (bisa tes sebelum simpan)."""
+        def g(i):
+            try: return self.query_one("#" + i, Input).value.strip()
+            except Exception: return ""
+        c = dict(self.cfg)
+        c["h1_api_user"] = g("h1u"); c["h1_api_token"] = g("h1t")
+        c["intigriti_api_token"] = g("itt"); c["yeswehack_api_token"] = g("ywt")
+        c["bugcrowd_api_token"] = g("bct"); c["firecrawl_api_key"] = g("fc")
+        c["serper_api_key"] = g("sp"); c["telegram_token"] = g("ntg")
+        c["llm_provider"] = g("lprov") or c.get("llm_provider", "anthropic")
+        c["llm_model"] = g("lmodel") or c.get("llm_model", "")
+        c["llm_base_url"] = g("lbase") or c.get("llm_base_url", "")
+        c["llm_api_key"] = g("lkey") or c.get("llm_api_key", "")
+        return c
+    def action_test_api(self):
+        try: self.query_one("#apires", Static).update("[cyan]🔌 menguji API… (baca nilai yang sekarang diisi)[/]")
+        except Exception: pass
+        self._run_api_test()
+    @work(thread=True)
+    def _run_api_test(self):
+        cfg = self._cfg_live()
+        rows = api_test_all(cfg)
+        from rich.markup import escape as _e
+        icon = {"OK": "[green]✓ OK[/]", "GAGAL": "[red]✗ GAGAL[/]", "-": "[dim]— lewati[/]"}
+        lines = ["[b]HASIL TEST API[/]"]
+        for name, st, detail in rows:
+            lines.append(f"  {icon.get(st,st)}  [b]{_e(name)}[/]  [dim]{_e(detail)}[/]")
+        ok = sum(1 for _, st, _ in rows if st == "OK")
+        lines.append(f"[dim]{ok} aktif & jalan[/]")
+        self.app.call_from_thread(self.query_one("#apires", Static).update, chr(10).join(lines))
     def action_save(self):
         def g(i):
             try: return self.query_one("#" + i, Input).value.strip()
