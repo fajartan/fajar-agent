@@ -2694,8 +2694,18 @@ class BBTUI(App):
         try: self._render()
         except Exception: pass
     def on_data_table_row_highlighted(self, ev):
-        pr = self.rowmap.get(ev.row_key)
-        if not pr: return
+        # DEBOUNCE: panel detail (string besar + repaint) TIDAK dibangun tiap baris saat
+        # scroll cepat -> hanya 60ms setelah kursor BERHENTI. Ini biang lag scroll.
+        self._pending_detail = self.rowmap.get(ev.row_key)
+        tm = getattr(self, "_detail_timer", None)
+        if tm is not None:
+            try: tm.stop()
+            except Exception: pass
+        self._detail_timer = self.set_timer(0.06, self._update_detail)
+    def _update_detail(self):
+        pr = getattr(self, "_pending_detail", None)
+        if not pr:
+            return
         others = [s for s in pr["scope"] if not is_wild(s)]
         mgd = {True: "managed", False: "unmanaged", None: "-"}.get(pr.get("managed"))
         md = (f"[b cyan]{pr['name']}[/] [{pr['platform']}]"
