@@ -2606,6 +2606,7 @@ class BBTUI(App):
         try: return self.rowmap.get(t.coordinate_to_cell_key(Coordinate(row, 0)).row_key)
         except Exception: return None
     def on_mouse_down(self, ev):
+        if isinstance(self.screen, ModalScreen): return   # modal terbuka -> jangan ganggu (cegah freeze)
         b = getattr(ev, "button", 0)
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
@@ -2627,6 +2628,7 @@ class BBTUI(App):
         self.selected_keys = set()                     # klik = mulai seleksi baru
         self._apply_drag_range(t, row, row)
     def on_mouse_move(self, ev):
+        if isinstance(self.screen, ModalScreen): return
         if not getattr(self, "_dragging", False): return
         try: t = self.query_one("#tbl", DataTable)
         except Exception: return
@@ -2642,6 +2644,7 @@ class BBTUI(App):
         try: self.release_mouse()
         except Exception: pass
     def on_mouse_up(self, ev):
+        if isinstance(self.screen, ModalScreen): return
         was = getattr(self, "_dragging", False)
         self._release_mouse_safe()
         self._last_mouse = datetime.datetime.now()
