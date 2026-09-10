@@ -380,22 +380,43 @@ def _h1_auth_hdr(cfg):
     return {"Authorization": "Basic " + base64.b64encode(f"{u}:{t}".encode()).decode(), "Accept": "application/json"}
 
 def _h1_detail(handle, hdr):
-    """Ambil scope terstruktur 1 program H1 lewat API resmi (termasuk PRIVATE yg kamu diundang)."""
+    """Ambil scope terstruktur 1 program H1 (termasuk PRIVATE yg kamu diundang).
+
+    PENTING: /programs/{handle} hanya memberi REFERENSI structured_scopes (id+type,
+    tanpa attributes) -> dulu scope selalu KOSONG. Endpoint benar =
+    /programs/{handle}/structured_scopes (berisi attributes penuh, ber-paginasi).
+    """
     try:
         d = json.loads(_get(f"https://api.hackerone.com/v1/hackers/programs/{handle}", headers=hdr, timeout=30))
-        a = d.get("data", {}).get("attributes", {}) or {}
-        ss = (((d.get("data", {}).get("relationships", {}) or {}).get("structured_scopes", {}) or {}).get("data", [])) or []
-        assets = [s.get("attributes", {}) for s in ss]
-        scope = [x.get("asset_identifier") for x in assets if x.get("asset_identifier") and x.get("eligible_for_submission", True)]
-        wild = [x.get("asset_identifier") for x in assets if x.get("asset_identifier") and (x.get("asset_type") == "WILDCARD" or is_wild(x.get("asset_identifier")))]
-        mx = max((SEV.get((x.get("max_severity") or "").lower(), 0) for x in assets), default=0)
-        sev = {v: k for k, v in SEV.items()}.get(mx, "-")
-        return dict(platform="hackerone", key=f"h1|{handle}", name="🔒 " + (a.get("name") or handle),
-                    url=f"https://hackerone.com/{handle}", bounty=bool(a.get("offers_bounties")), bounty_min=None,
-                    bounty_max=None, cur="$", maxsev=sev, managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
-                    signal="PRIVATE / accessible (login API)", scope=scope, wild=wild)
     except Exception:
         return None
+    a = d.get("data", {}).get("attributes", {}) or {}
+    assets = []
+    url = f"https://api.hackerone.com/v1/hackers/programs/{handle}/structured_scopes?page%5Bsize%5D=100"
+    for _pg in range(6):
+        try:
+            sd = json.loads(_get(url, headers=hdr, timeout=30))
+        except Exception:
+            break
+        for s in sd.get("data", []):
+            at = s.get("attributes", {}) or {}
+            if at: assets.append(at)
+        nxt = (sd.get("links") or {}).get("next")
+        if not nxt: break
+        url = nxt
+    scope = [x.get("asset_identifier") for x in assets
+             if x.get("asset_identifier") and x.get("eligible_for_submission", True)]
+    wild = [x.get("asset_identifier") for x in assets
+            if x.get("asset_identifier") and (x.get("asset_type") == "WILDCARD" or is_wild(x.get("asset_identifier")))]
+    if not scope:                                  # fallback tahan-struktur
+        scope = _walk_scope(d)
+        wild = [i for i in scope if is_wild(i)]
+    mx = max((SEV.get((x.get("max_severity") or "").lower(), 0) for x in assets), default=0)
+    sev = {v: k for k, v in SEV.items()}.get(mx, "-")
+    return dict(platform="hackerone", key=f"h1|{handle}", name="🔒 " + (a.get("name") or handle),
+                url=f"https://hackerone.com/{handle}", bounty=bool(a.get("offers_bounties")), bounty_min=None,
+                bounty_max=None, cur="$", maxsev=sev, managed=None, eff=None, ttfr=None, ttb=None, ttr=None,
+                signal="PRIVATE / accessible (login API)", scope=scope, wild=wild)
 
 def fetch_h1_private(cfg, have_keys, cap=60):
     """Tarik program yg BISA KAMU AKSES dari akun H1 (termasuk PRIVATE) via API resmi. Butuh h1_api_user+token."""
@@ -537,11 +558,14 @@ def fetch_ywh_private(cfg, have_keys, cap=50):
 
 def load_programs(cfg):
     cur, errs = {}, []
+    all_public = set()   # SEMUA key publik (walau tersaring filter) -> dedup private yg benar
     for pf in cfg["platforms"]:
         try:
             for p in fetch(pf):
                 pr = norm(pf, p)
-                if pr and passes(pr, cfg): cur[pr["key"]] = pr
+                if not pr: continue
+                all_public.add(pr["key"])
+                if passes(pr, cfg): cur[pr["key"]] = pr
         except Exception as e:
             errs.append(f"{pf}: {e}")
     # + program PRIVATE dari akun (bila token diisi) -- SELALU beri feedback (masuk/ditolak/0)
@@ -549,7 +573,9 @@ def load_programs(cfg):
     def _pull(label, fn, *need):
         miss = [n for n in need if not cfg.get(n)]
         if miss: return                                  # token utama tak diisi -> lewati diam
-        priv, perr = fn(cfg, set(cur.keys()))
+        # dedup terhadap SEMUA publik (bukan cuma yg lolos filter) -> program publik
+        # yg tersaring TIDAK re-muncul sbg 'private' (dulu linkedin/starbucks dsb dobel 🔒).
+        priv, perr = fn(cfg, all_public | set(cur.keys()))
         if perr:
             errs.append(f"❌ {label}: {perr}"); return
         masuk = 0
