@@ -224,20 +224,42 @@ def mem_digest(max_chars=2500):
     return idx[:max_chars] + (" …" if len(idx) > max_chars else "")
 
 # ---------------- persistensi sesi (resume percakapan panjang) ----------------
-def session_save(sid, messages):
-    """Simpan sesi. Kembalikan PATH bila sukses, None bila gagal.
+def session_save(sid, messages, target=""):
+    """Simpan sesi (sistem riwayat ala ChatGPT). Kembalikan PATH bila sukses, None gagal.
 
-    Sengaja tidak melempar exception (dipakai di jalur autosave), tapi hasilnya
-    dikembalikan supaya pemanggil bisa melaporkan kegagalan alih-alih diam saja.
+    sid UNIK per sesi -> /new bikin file baru, sesi lama TETAP ada (jadi riwayat).
+    target = slug target (dipakai session_latest_for utk auto-lanjut sesi terakhir).
     """
     try:
         os.makedirs(SESS_DIR, exist_ok=True)
         path = os.path.join(SESS_DIR, _slug(sid) + ".json")
         with open(path, "w", encoding="utf-8") as fh:
-            json.dump({"saved": datetime.datetime.now().isoformat(), "messages": messages}, fh)
+            json.dump({"saved": datetime.datetime.now().isoformat(), "target": target, "messages": messages}, fh)
         return path
     except Exception:
         return None
+
+def session_latest_for(target):
+    """Sesi TERBARU (by 'saved') milik satu target -> utk AUTO-LANJUT saat chat dibuka.
+    Cocokkan metadata 'target'; file lama tanpa metadata dicocokkan lewat nama 'tui-<target>'."""
+    tgt = str(target or "")
+    best = None
+    try: names = os.listdir(SESS_DIR)
+    except Exception: return None
+    for fn in names:
+        if not fn.endswith(".json"): continue
+        path = os.path.join(SESS_DIR, fn)
+        try: d = json.load(open(path, encoding="utf-8"))
+        except Exception: continue
+        dt = d.get("target", "")
+        match = (dt == tgt) if dt else (fn[:-5] == "tui-" + tgt)   # file lama: cocokkan by nama
+        if not match: continue
+        msgs = d.get("messages") or []
+        if not msgs: continue
+        saved = d.get("saved", "")
+        if best is None or saved > best["saved"]:
+            best = {"sid": fn[:-5], "path": path, "messages": msgs, "saved": saved, "n": len(msgs)}
+    return best
 
 def _msg_text(c):
     """Ambil teks dari content yang bisa berupa str / list blok / dict."""
@@ -275,7 +297,7 @@ def session_list():
             preview = who + " ".join(t.split())[:100]
             break
         out.append({"sid": fn[:-5], "path": path, "saved": d.get("saved", ""),
-                    "n": len(msgs), "preview": preview})
+                    "target": d.get("target", ""), "n": len(msgs), "preview": preview})
     out.sort(key=lambda x: x.get("saved") or "", reverse=True)
     return out
 

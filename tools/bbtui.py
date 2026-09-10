@@ -1531,9 +1531,14 @@ class LlmChatScreen(ModalScreen):
         self.ctx = 0; self.window = 0; self.compacts = 0; self._worker = None; self.t0 = None; self._suggest = ""
         self.sess_start = datetime.datetime.now(); self._tk = 0; self._last_agent = ""
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
-        # sesi di-key PER TARGET -> tiap program punya riwayat sendiri (tak saling timpa)
+        # RIWAYAT SESI ala ChatGPT: tiap sesi id UNIK (sess_id) -> /new bikin sesi baru,
+        # sesi lama TETAP tersimpan. target_slug utk mengelompokkan & auto-lanjut sesi terakhir.
         base = "strategist" if self.strategist else ((target.get("key") or target.get("name")) if target else "general")
-        self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
+        self.target_slug = re.sub(r"\W", "_", str(base))[:50]
+        self.sess_id = self._new_sess_id()   # bisa ditimpa on_mount (lanjut sesi terakhir)
+    def _new_sess_id(self):
+        return "tui-%s-%s%s" % (self.target_slug, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_"),
+                                base64.b16encode(os.urandom(2)).decode().lower())
     THINK_KAO = ["(°□°)", "(￣▽￣)", "( ˘•ω•˘ )", "(⌐■_■)", "(¬_¬ )", "(๑•̀ㅂ•́)و", "(°▽°)", "( •̀ ω •́ )"]
     THINK_WORD = ["musing…", "berpikir…", "menganalisa…", "merangkai hipotesis…", "menimbang…",
                   "meracik payload…", "menyusun rencana…", "menelusuri scope…", "brainstorming…"]
@@ -1658,29 +1663,37 @@ class LlmChatScreen(ModalScreen):
                 log.write("\n[red]⚠ belum ada API key[/] [dim]— Settings (s) → blok LLM AGENT[/]")
             inp = self.query_one("#chatinput", ChatBox)
             if self.target and key:
-                self.messages = la.new_messages(prov == "anthropic")
-                for _tg in self.targets:                       # suntik konteks SEMUA target terpilih
-                    self.messages.append({"role": "user", "content": program_context(_tg)})
                 nm = self.target.get("name")
                 if len(self.targets) > 1:
                     names = ", ".join((t.get("name") or "?") for t in self.targets[:6])
                     log.write(f"\n[b green]🎯 {len(self.targets)} TARGET terpilih:[/] [dim]{names}"
                               + ("..." if len(self.targets) > 6 else "") + "[/]")
-                    self._suggest = (f"bandingkan & prioritaskan {len(self.targets)} target ini dari scope-nya, "
-                                     "lalu mulai dari yg paling menjanjikan: SCOPE-GATE + HUNTING BRIEF.")
                 else:
                     g = classify_assets(self.target.get("scope", []))
                     present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
                     log.write(f"\n[b green]🎯 {nm}[/] [dim]· {self.target.get('platform')} · "
                               f"{', '.join(present) or '-'} · wildcard {len(self.target.get('wild', []))} · "
                               f"sev {self.target.get('maxsev', '-')}[/]")
-                prev = la.session_load(self.sess_key)
-                if prev:
-                    log.write(f"[green]💾 sesi tersimpan ({len(prev)} pesan)[/] [dim]— ketik[/] [yellow]/resume[/]")
-                log.write("\n[b yellow]⏸ menunggu perintahmu[/] [dim]— Enter kirim · / menu[/]")
-                log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
-                self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
-                                 "HUNTING BRIEF sesuai jenis aset.")
+                # AUTO-LANJUT sesi terakhir target ini (ala ChatGPT). Multi-target = selalu baru.
+                latest = la.session_latest_for(self.target_slug) if len(self.targets) == 1 else None
+                if latest:
+                    self.messages = latest["messages"]; self.sess_id = latest["sid"]
+                    log.write(f"[green]💾 melanjutkan sesi terakhir ({latest['n']} pesan)[/] "
+                              "[dim]— [/][yellow]/new[/][dim] mulai bersih · [/][yellow]/resume[/][dim] riwayat lain[/]")
+                    self._render_history(self.messages)
+                    self._suggest = f"lanjutkan hunting {nm} dari sesi ini."
+                else:
+                    self.messages = la.new_messages(prov == "anthropic")
+                    for _tg in self.targets:                   # suntik konteks SEMUA target terpilih
+                        self.messages.append({"role": "user", "content": program_context(_tg)})
+                    log.write("\n[b yellow]⏸ menunggu perintahmu[/] [dim]— Enter kirim · / menu[/]")
+                    log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
+                    if len(self.targets) > 1:
+                        self._suggest = (f"bandingkan & prioritaskan {len(self.targets)} target ini dari scope-nya, "
+                                         "lalu mulai dari yg paling menjanjikan: SCOPE-GATE + HUNTING BRIEF.")
+                    else:
+                        self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
+                                         "HUNTING BRIEF sesuai jenis aset.")
             elif self.strategist and key:
                 # "DI LUAR": suntik portfolio -> agent jadi penasihat pemilihan target.
                 self.messages = la.new_messages(prov == "anthropic")
@@ -1782,7 +1795,7 @@ class LlmChatScreen(ModalScreen):
     def _autosave(self):
         """Simpan sesi tanpa berisik. Kembalikan path bila sukses, None bila tidak."""
         try:
-            if self.messages: return _llm_mod().session_save(self.sess_key, self.messages)
+            if self.messages: return _llm_mod().session_save(self.sess_id, self.messages, target=self.target_slug)
         except Exception: pass
         return None
     def on_unmount(self):
@@ -1798,16 +1811,17 @@ class LlmChatScreen(ModalScreen):
     def action_clear(self):
         self.query_one("#chatlog", SelectableLog).clear(); self.query_one("#chatlog", SelectableLog).write("[dim]layar dibersihkan (percakapan & memori tetap).[/]")
     def action_resume(self):
-        self.app.push_screen(ResumePickerScreen(self._resume_pick, current=self.sess_key))
+        self.app.push_screen(ResumePickerScreen(self._resume_pick, current=self.sess_id))
     def _resume_pick(self, item):
         la = _llm_mod(); log = self.query_one("#chatlog", SelectableLog)
         msgs = la.session_load_path(item["path"])
         if not msgs:
             log.write("[yellow]riwayat itu kosong / gagal dibaca.[/]"); return
         self.messages = msgs
-        # ikut pindah sess_key: kelanjutan chat tersimpan ke riwayat YANG DIPILIH,
+        # ikut pindah sess_id + target: kelanjutan chat tersimpan ke riwayat YANG DIPILIH,
         # bukan tercampur ke sesi target yang sedang dibuka.
-        self.sess_key = item["sid"]
+        self.sess_id = item["sid"]
+        if item.get("target"): self.target_slug = item["target"]
         self.turns = 0
         log.write("\n[dim]" + "\u2500" * 60 + "[/]")
         log.write(f"[b green]💾 melanjutkan riwayat[/] [b]{item['sid']}[/] "
@@ -1848,9 +1862,10 @@ class LlmChatScreen(ModalScreen):
         log = self.query_one("#chatlog", SelectableLog)
         prov, model, base, key = _llm_creds(self.cfg)
         if not key: log.write("[red]set API key dulu (Settings s)[/]"); return
-        # promosikan sesi jadi per-target
+        # promosikan sesi jadi per-target -> sesi hunting BARU (riwayat strategist tetap tersimpan)
         self.target = pr; self.targets = [pr]; self.strategist = False
-        self.sess_key = "tui-" + re.sub(r"\W", "_", str(pr.get("key") or pr.get("name") or "target"))[:50]
+        self.target_slug = re.sub(r"\W", "_", str(pr.get("key") or pr.get("name") or "target"))[:50]
+        self.sess_id = self._new_sess_id()
         if self.messages is None:
             self.messages = _llm_mod().new_messages(prov == "anthropic")
         # suntik scope RESMI (SENYAP -> tak di-echo ke layar, cukup banner ringkas)
@@ -1903,13 +1918,15 @@ class LlmChatScreen(ModalScreen):
             else:
                 log.write(f"[yellow]provider sekarang: {self.cfg.get('llm_provider','anthropic')}. Pakai: /provider anthropic | openai[/]")
         elif cmd in ("new", "reset"):
-            self.messages = None; self.tok_in = self.tok_out = self.turns = 0; self.ctx = 0; self.t0 = None; self._refresh_bars()
+            # SESI BARU: id baru -> sesi lama TETAP tersimpan sbg riwayat (/resume utk buka lagi)
+            self.messages = None; self.tok_in = self.tok_out = self.turns = 0; self.ctx = 0; self.t0 = None
+            self.sess_id = self._new_sess_id(); self._refresh_bars()
             if self.target:   # sesi baru tetap bawa scope target
                 self.messages = _llm_mod().new_messages(_llm_creds(self.cfg)[0] == "anthropic")
                 self.messages.append({"role": "user", "content": program_context(self.target)})
-                log.write(f"[b]-- sesi baru untuk {self.target.get('name')} --[/] [dim](scope target dimuat ulang; memori tetap)[/]")
+                log.write(f"[b]-- sesi baru untuk {self.target.get('name')} --[/] [dim](scope dimuat ulang; sesi lama tersimpan di /resume)[/]")
             else:
-                log.write("[b]-- sesi baru --[/] [dim](memori jangka panjang tetap)[/]")
+                log.write("[b]-- sesi baru --[/] [dim](sesi lama tersimpan di /resume; memori tetap)[/]")
         elif cmd == "clear":
             self.action_clear(); log.write("[dim]layar chat dibersihkan (riwayat sesi TETAP tersimpan).[/]")
         elif cmd == "resume": self.action_resume()
@@ -2066,7 +2083,7 @@ class LlmChatScreen(ModalScreen):
         prov = _llm_creds(self.cfg)[0]
         if self.messages is None: self.messages = la.new_messages(prov == "anthropic")
         self.messages.append({"role": "user", "content": f"[ARTEFAK DI-UPLOAD: {label}]\n{content}"})
-        try: la.session_save(self.sess_key, self.messages)
+        try: la.session_save(self.sess_id, self.messages, target=self.target_slug)
         except Exception: pass
         log.write(f"[green]📎 ditambahkan ke konteks:[/] {label} [dim]({len(content)} char)[/]. "
                   "Beri instruksi (mis. 'cari endpoint & secret di artefak ini').")
@@ -2410,9 +2427,12 @@ class ResumePickerScreen(ModalScreen):
             box.add_option(Option("[dim](belum ada riwayat tersimpan)[/]", id="none"))
             return
         for i, it in enumerate(self.items):
-            nama = it["sid"]
-            if nama.startswith("tui-"): nama = nama[4:]
-            nama = nama.replace("-", " ").strip() or "(tanpa nama)"
+            # nama = target (dari metadata) -> rapi; fallback parse dari sid lama
+            nama = (it.get("target") or "").replace("_", " ").strip()
+            if not nama:
+                nama = it["sid"]
+                if nama.startswith("tui-"): nama = nama[4:]
+                nama = re.sub(r"-\d{8}_\d{6}.*$", "", nama).replace("_", " ").strip() or "(tanpa nama)"
             waktu = (it.get("saved") or "")[:16].replace("T", " ")
             kini = "  [b green]<- sedang dibuka[/]" if self.current and it["sid"] == self.current else ""
             baris1 = f"[b]{i+1}. {escape(nama)}[/]{kini}   [dim]{it['n']} pesan · {waktu}[/]"
