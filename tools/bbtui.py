@@ -2144,16 +2144,44 @@ class LlmChatScreen(ModalScreen):
         from rich.markup import escape
         self._write_box("▶ kamu", [escape(l) for l in (text.splitlines() or [""])], "green")
     def _table_text(self, rows):
+        # Tabel markdown -> teks rata kolom yg MUAT di kotak chat. Kolom terlebar
+        # dikecilkan & sel panjang DIBUNGKUS (word-wrap) jadi beberapa baris ->
+        # tak lagi meluber/berantakan saat ada kolom "alasan" yg panjang.
         from rich.markup import escape
-        cells = lambda r: [c.strip() for c in r.strip().strip("|").split("|")]
-        hdr = cells(rows[0]); data = [(cells(r) + [""] * len(hdr))[:len(hdr)] for r in rows[1:]]
-        w = [len(h) for h in hdr]
+        import textwrap
+        def clean(c):                                  # buang penanda markdown di sel (**tebal**, `kode`)
+            c = c.strip()
+            c = re.sub(r"\*\*(.+?)\*\*", r"\1", c); c = re.sub(r"`([^`]+)`", r"\1", c)
+            return c.strip()
+        cells = lambda r: [clean(c) for c in r.strip().strip("|").split("|")]
+        hdr = cells(rows[0]); n = len(hdr)
+        data = [(cells(r) + [""] * n)[:n] for r in rows[1:]]
+        w = [len(hdr[i]) for i in range(n)]            # lebar alami tiap kolom
         for row in data:
-            for i, c in enumerate(row): w[i] = max(w[i], len(c))
-        line = lambda cs: " │ ".join((cs[i] + " " * (w[i] - len(cs[i]))) for i in range(len(hdr)))
-        out = ["[b]" + escape(line(hdr)) + "[/]",
-               "[dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]"]
-        out += [escape(line(r)) for r in data]
+            for i in range(n): w[i] = max(w[i], len(row[i]))
+        box = self._box_width() - 2                    # sisakan utk prefix "│ "
+        avail = max(12, box - 3 * (n - 1))             # ' │ ' antar kolom
+        floor = [max(3, min(len(hdr[i]) or 3, 12)) for i in range(n)]
+        guard = 0
+        while sum(w) > max(avail, sum(floor)) and guard < 20000:   # kecilkan kolom TERLEBAR dulu
+            j = max(range(n), key=lambda i: w[i] - floor[i])
+            if w[j] <= floor[j]: break
+            w[j] -= 1; guard += 1
+        def wrap_cell(txt, width):
+            if not txt: return [""]
+            return textwrap.wrap(txt, width=max(1, width), break_long_words=True, break_on_hyphens=False) or [""]
+        def render(rowcells, bold=False):
+            stacks = [wrap_cell(rowcells[i], w[i]) for i in range(n)]
+            height = max(len(s) for s in stacks)
+            lines = []
+            for k in range(height):
+                seg = [(stacks[i][k] if k < len(stacks[i]) else "") for i in range(n)]
+                ln = " │ ".join(seg[i] + " " * (w[i] - len(seg[i])) for i in range(n))
+                lines.append(("[b]" + escape(ln) + "[/]") if bold else escape(ln))
+            return lines
+        out = render(hdr, bold=True)
+        out.append("[dim]" + escape("─┼─".join("─" * x for x in w)) + "[/]")
+        for row in data: out += render(row)
         return "\n".join(out)
     def _write_agent(self, body):
         self._last_agent = body
