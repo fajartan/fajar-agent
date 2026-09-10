@@ -1587,7 +1587,7 @@ class LlmChatScreen(ModalScreen):
             # bar berjalan, ASCII murni (lebar pasti 1 sel/karakter di semua terminal)
             n, blk, pos = 14, 3, self._tk % 14
             cells = "".join("█" if any((pos + i) % n == j for i in range(blk)) else "░" for j in range(n))
-            bar.update(f"[dim][[/dim]{cells}[dim]][/dim]")   # [[ ]] = kurung literal di markup Rich
+            bar.update(f"[dim]\\[{cells}][/dim]")   # \[ = kurung buka LITERAL (bukan tag); ] lone = literal
             wrap.add_class("on")
         else:
             bar.update("")              # bar diam total saat idle: tak ada animasi/repaint
