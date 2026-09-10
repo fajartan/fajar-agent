@@ -1147,6 +1147,7 @@ TOOL_GROUPS = [
 
 SLASH_HELP = [
     # -- hunting (menutup celah: dulu recon/dedup/monitor hanya ada di dashboard) --
+    ("/pick <nama>", "[STRATEGIST] pilih target rekomendasi -> mulai rangkaian hunting penuh"),
     ("/target", "lihat target aktif + scope resmi yang dimuat ke konteks"),
     ("/recon [domain]", "jalankan recon (default: apex target aktif)"),
     ("/monitor [domain]", "pantau subdomain baru"),
@@ -1335,10 +1336,15 @@ class LlmChatScreen(ModalScreen):
                 ("ctrl+pageup", "log_up", "gulir naik"), ("ctrl+pagedown", "log_down", "gulir turun"),
                 ("ctrl+home", "log_home", "atas"), ("ctrl+end", "log_end", "bawah"),
                 ("f3", "toggle_active", "yolo")]
-    def __init__(self, cfg, target=None, targets=None):
+    def __init__(self, cfg, target=None, targets=None, mode="target", portfolio="", pool=None):
         super().__init__(); self.cfg = cfg
         self.targets = targets if targets else ([target] if target else [])
         self.target = self.targets[0] if self.targets else None
+        # MODE STRATEGIST ("di luar"): belum pilih target -> agent menganalisa SELURUH
+        # portfolio (dari dashboard) lalu merekomendasikan target; handoff via /pick.
+        self.strategist = (mode == "strategist")
+        self.portfolio = portfolio or ""
+        self.pool = pool or []            # daftar pr utk /pick (cari by nama)
         self.messages = None
         self.allow_gated = False; self.busy = False; self.activity = "idle"
         self.tok_in = 0; self.tok_out = 0; self.turns = 0
@@ -1346,7 +1352,7 @@ class LlmChatScreen(ModalScreen):
         self.sess_start = datetime.datetime.now(); self._tk = 0; self._last_agent = ""
         self.sid = datetime.datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + base64.b16encode(os.urandom(3)).decode().lower()
         # sesi di-key PER TARGET -> tiap program punya riwayat sendiri (tak saling timpa)
-        base = (target.get("key") or target.get("name")) if target else "general"
+        base = "strategist" if self.strategist else ((target.get("key") or target.get("name")) if target else "general")
         self.sess_key = "tui-" + re.sub(r"\W", "_", str(base))[:50]
     THINK_KAO = ["(°□°)", "(￣▽￣)", "( ˘•ω•˘ )", "(⌐■_■)", "(¬_¬ )", "(๑•̀ㅂ•́)و", "(°▽°)", "( •̀ ω •́ )"]
     THINK_WORD = ["musing…", "berpikir…", "menganalisa…", "merangkai hipotesis…", "menimbang…",
@@ -1491,6 +1497,19 @@ class LlmChatScreen(ModalScreen):
                 log.write(f"[dim]  saran: \"mulai hunting {nm}: SCOPE-GATE lalu HUNTING BRIEF\"[/]")
                 self._suggest = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun "
                                  "HUNTING BRIEF sesuai jenis aset.")
+            elif self.strategist and key:
+                # "DI LUAR": suntik portfolio -> agent jadi penasihat pemilihan target.
+                self.messages = la.new_messages(prov == "anthropic")
+                if self.portfolio:
+                    self.messages.append({"role": "user", "content": self.portfolio})
+                log.write(f"\n[b green]🧭 STRATEGIST[/] [dim]· belum pilih target · {len(self.pool)} program di meja[/]")
+                log.write("[dim]  Aku analisa portfolio-mu (skor anti-ramai + status worklist) lalu[/]")
+                log.write("[dim]  merekomendasikan target terbaik. Setuju? ketik[/] [yellow]/pick <nama>[/] [dim]→ mulai hunting penuh.[/]")
+                log.write("\n[b yellow]⏸ siap menganalisa[/] [dim]— Enter kirim · / menu[/]")
+                log.write("[dim]  saran: \"analisa portfolio & rekomendasikan 2-3 target terbaik\"[/]")
+                self._suggest = ("analisa PORTFOLIO CONTEXT: rekomendasikan 2-3 target paling menjanjikan "
+                                 "(anti-duplikat, permukaan scope luas, sepi) beserta ALASAN singkat tiap target; "
+                                 "tutup dengan CHECKPOINT minta operator ketik /pick <nama>.")
             else:
                 pass   # status bar sudah menampilkan "/ menu - esc stop - ^Q keluar" terus-menerus
         if self.cfg.get("mcp_servers"):
@@ -1629,6 +1648,38 @@ class LlmChatScreen(ModalScreen):
                 elif isinstance(c, str): text = c
                 if text.strip(): self._write_agent(text)
             # pesan tool/tool_result (internal) dilewati agar transkrip bersih
+    # ---- handoff strategist -> hunting satu target ----
+    def _find_pool(self, arg):
+        """Cari 1 program di pool by nama (cocok persis > awalan > substring)."""
+        q = (arg or "").strip().lower()
+        if not q: return None
+        exact = [p for p in self.pool if (p.get("name") or "").lower() == q]
+        if exact: return exact[0]
+        starts = [p for p in self.pool if (p.get("name") or "").lower().startswith(q)]
+        if starts: return starts[0]
+        sub = [p for p in self.pool if q in (p.get("name") or "").lower()]
+        return sub[0] if len(sub) == 1 else (sub[0] if sub else None)
+    def _handoff(self, pr):
+        """Serah-terima: strategist -> hunting PENUH satu target (scope resmi dari TUI)."""
+        log = self.query_one("#chatlog", SelectableLog)
+        prov, model, base, key = _llm_creds(self.cfg)
+        if not key: log.write("[red]set API key dulu (Settings s)[/]"); return
+        # promosikan sesi jadi per-target
+        self.target = pr; self.targets = [pr]; self.strategist = False
+        self.sess_key = "tui-" + re.sub(r"\W", "_", str(pr.get("key") or pr.get("name") or "target"))[:50]
+        if self.messages is None:
+            self.messages = _llm_mod().new_messages(prov == "anthropic")
+        # suntik scope RESMI (SENYAP -> tak di-echo ke layar, cukup banner ringkas)
+        self.messages.append({"role": "user", "content": program_context(pr)})
+        nm = pr.get("name") or "-"
+        g = classify_assets(pr.get("scope", [])); present = [k for k in ("web", "api", "android", "ios", "other") if g[k]]
+        log.write("\n[dim]" + "─" * 40 + "[/]")
+        log.write(f"[b green]🎯 HANDOFF → {nm}[/] [dim]· {pr.get('platform')} · {', '.join(present) or '-'} · "
+                  f"wildcard {len(pr.get('wild', []))} · sev {pr.get('maxsev', '-')}[/]")
+        log.write("[dim]scope resmi dimuat. Mulai rangkaian hunting penuh (checkpoint tiap tahap)...[/]")
+        self._refresh_bars()
+        kick = (f"mulai hunting {nm}: SCOPE-GATE pakai TARGET CONTEXT lalu susun HUNTING BRIEF sesuai jenis aset.")
+        self._write_user(kick); self._send(kick)
     # ---- slash commands ----
     def _slash(self, raw):
         log = self.query_one("#chatlog", SelectableLog)
@@ -1678,6 +1729,16 @@ class LlmChatScreen(ModalScreen):
         elif cmd == "clear":
             self.action_clear(); log.write("[dim]layar chat dibersihkan (riwayat sesi TETAP tersimpan).[/]")
         elif cmd == "resume": self.action_resume()
+        elif cmd in ("pick", "gas"):
+            if not self.pool:
+                log.write("[yellow]/pick hanya di mode STRATEGIST (buka lewat tombol [b]t[/] di dashboard).[/]"); return
+            if not arg:
+                log.write("[yellow]pakai:[/] [b]/pick <nama program>[/] [dim](cukup sebagian nama, mis. /pick whatnot)[/]"); return
+            pr = self._find_pool(arg)
+            if not pr:
+                near = ", ".join((p.get("name") or "?") for p in self.pool[:8])
+                log.write(f"[yellow]'{arg}' tak cocok di portfolio.[/] [dim]teratas: {near}...[/]"); return
+            self._handoff(pr)
         elif cmd == "save":
             if not self.messages:
                 log.write("[yellow]belum ada percakapan untuk disimpan.[/]")
@@ -2241,7 +2302,7 @@ class BBTUI(App):
     BINDINGS = [Binding("ctrl+c", "copy_text", "salin", key_display="Ctrl+C", show=True), ("q", "quit", "keluar"), ("slash", "search", "cari"), ("r", "refresh", "refresh"),
                 ("e", "recon", "recon"), ("m", "monitor", "monitor"), ("d", "dedup", "dedup"),
                 ("n", "notify", "notif"), ("w", "workspace", "workspace"), ("x", "external", "ext-tools"),
-                ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
+                ("b", "only_new", "baru"), ("c", "cycle_sort", "urut"), ("l", "llm", "llm-agent"), ("t", "strategist", "strategist"), ("p", "pipeline", "pipeline"), ("g", "schedule", "jadwal"),
                 ("f", "cycle_view", "filter"), ("v", "mark_reviewed", "ditinjau"), ("k", "mark_working", "kerja"), ("full_stop", "toggle_skip", "skip"),
                 ("space", "toggle_select", "pilih"), ("a", "select_all", "pilih semua"),
                 ("s", "settings", "settings"), ("question_mark", "help", "bantuan"),
@@ -2870,6 +2931,34 @@ class BBTUI(App):
     def action_llm(self):
         prs = self._menu_targets(self._selected())
         if prs: self._ctx_action(prs, "llm")       # hormati multi-seleksi (bukan cuma 1)
+    def _portfolio_brief(self, limit=45):
+        """Ringkas SELURUH portfolio (dari dashboard) -> brief padat utk STRATEGIST.
+        Urut by Q anti-ramai (tinggi=sepi), buang skip. Return (teks, pool_list)."""
+        cand = [p for p in self.progs.values() if self._st(p["key"]) != "skip"]
+        cand.sort(key=lambda p: self._q(p), reverse=True)
+        pool = cand[:max(1, limit)]
+        stflag = {"working": "🎯kerja", "reviewed": "👁ditinjau"}
+        L = ["[PORTFOLIO CONTEXT] -- daftar program dari dashboard operator (sumber RESMI: TUI; sudah difilter & diberi skor).",
+             "PERANMU = STRATEGIST: pilih & rekomendasikan target TERBAIK utk diburu. JANGAN list_programs/new_programs/program_detail (data sudah di sini).",
+             "Q = skor anti-ramai (makin TINGGI makin sepi/menjanjikan utk hindari duplikat). status = worklist operator; 🆕 = program baru.",
+             f"{len(pool)} teratas (dari {len(cand)} non-skip):",
+             "rank | Q | program | plat | reward | aset | wild | flag"]
+        for i, p in enumerate(pool, 1):
+            fl = []
+            if p["key"] in self.new_keys: fl.append("🆕baru")
+            st = self._st(p["key"])
+            if st: fl.append(stflag.get(st, st))
+            L.append(f"{i:>2} | {self._q(p):>3} | {(p.get('name') or '-')[:34]} | {p.get('platform')} | "
+                     f"{reward(p)} | {len(p.get('scope', []))} | {len(p.get('wild', []))} | {' '.join(fl) or '-'}")
+        L += ["",
+              "Tugas: analisa lalu rekomendasikan 2-3 target dgn ALASAN (permukaan scope, kenapa sepi/anti-dup, jenis aset).",
+              "Tutup dgn CHECKPOINT: minta operator ketik  /pick <nama>  utk MULAI rangkaian hunting penuh target itu."]
+        return "\n".join(L), pool
+    def action_strategist(self):
+        if not self.progs:
+            self.notify("data program belum termuat — tunggu/refresh (r) dulu"); return
+        brief, pool = self._portfolio_brief()
+        self.push_screen(LlmChatScreen(self.cfg, mode="strategist", portfolio=brief, pool=pool))
     def action_recon(self):
         prs = self._menu_targets(self._selected())
         if prs: self._ctx_action(prs, "recon")
