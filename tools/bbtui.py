@@ -2717,18 +2717,41 @@ class BBTUI(App):
         empty = not self.progs
         self.app.call_from_thread(self._load_start_ui, empty)
         progs, errs = load_programs(self.cfg)
+        old = self.progs or {}
+        # 🔒/⚠ = info (bukan gagal); sisanya (exception platform, ❌ private) = tarikan GAGAL
+        hard = [e for e in (errs or []) if not str(e).startswith(("🔒", "⚠"))]
+        if not progs:
+            # TARIKAN TOTAL GAGAL (jaringan/semua platform) -> JANGAN timpa/hapus apa pun.
+            # Dulu: self.progs=progs(kosong) + _save_cache() -> data hilang PERMANEN.
+            self._refreshing = False
+            keep = list(errs or [])
+            keep.append("⚠ tarikan kosong — data sebelumnya DIPERTAHANKAN (cek jaringan lalu r)" if old
+                        else "⚠ tarikan kosong — belum ada data (cek jaringan/API lalu r)")
+            self._last_errs = keep
+            self.app.call_from_thread(self._load_done_ui)
+            self.app.call_from_thread(self._render, keep)
+            if announce:
+                self.app.call_from_thread(lambda: self.notify(
+                    "⚠ gagal menyegarkan — data lama dipertahankan", severity="warning", timeout=6))
+            return
+        if hard and old:
+            # TARIKAN SEBAGIAN GAGAL -> UNION: data baru diutamakan, entri lama yg hilang
+            # dari tarikan ini TETAP ada (mis. 1 platform/token blip) -> tak 'hilang' sesaat.
+            merged = dict(old); merged.update(progs); progs = merged
         prev_new = self.new_keys
         self.new_keys = self._diff_seen(progs)   # diff vs seen -> program yg BENAR-BENAR baru
         self.progs = progs
         self._fetched_at = datetime.datetime.now()
         self._refreshing = False
+        self._last_errs = errs
         self._save_cache()                       # SAVE: cache tarikan -> start berikutnya instan
         self.app.call_from_thread(self._load_done_ui)
         self.app.call_from_thread(self._render, errs)
         if announce and self.new_keys and self.new_keys != prev_new:
             self.app.call_from_thread(self._announce_new)
         elif announce:
-            msg = f"✓ data terbaru — {len(progs)} program (tak ada yg baru)"
+            extra = " (sebagian sumber gagal — data lama dipertahankan)" if hard else " (tak ada yg baru)"
+            msg = f"✓ data terbaru — {len(progs)} program{extra}"
             self.app.call_from_thread(lambda: self.notify(msg, timeout=4))
     def _announce_new(self):
         n = len(self.new_keys)
