@@ -2620,6 +2620,7 @@ class BBTUI(App):
     def on_mount(self):
         self._trace_on()
         self._start_freeze_watch()          # FAJAR_FREEZE=1 -> rekam siapa nge-blok thread utama
+        self._start_profiler()              # FAJAR_PROFILE=1 -> profil fungsi paling makan waktu
         t = self.query_one("#tbl", DataTable)
         t.add_columns("S", "Program", "Plat", "Reward", "WC", "Aset", "Sev", "Q")
         self.query_one("#side").border_title = "DASHBOARD"
@@ -2655,6 +2656,43 @@ class BBTUI(App):
                     except Exception:
                         pass
         threading.Thread(target=watch, daemon=True).start()
+    def _start_profiler(self):
+        # SAMPLING PROFILER opsional (env FAJAR_PROFILE=1): tiap 12ms ambil frame TERATAS
+        # thread utama & tally -> saat keluar tulis fungsi paling 'makan waktu' ke
+        # ~/fajar-profile.txt. Menemukan biang BERAT kronis (hitch kecil beruntun yg tak
+        # sampai ambang freeze). Tanpa env: nol overhead.
+        if not os.environ.get("FAJAR_PROFILE"):
+            return
+        import time as _t, threading, sys as _s, collections, atexit
+        main_id = threading.get_ident()
+        counts = collections.Counter(); state = {"n": 0}
+        def sampler():
+            while not getattr(self, "_stop_watch", False):
+                _t.sleep(0.012)
+                fr = _s._current_frames().get(main_id)
+                if fr is None: continue
+                state["n"] += 1
+                # rangkai 3 frame teratas -> konteks cukup tanpa terlalu ramai
+                sig = []
+                f = fr
+                for _ in range(3):
+                    if f is None: break
+                    co = f.f_code
+                    sig.append(f"{os.path.basename(co.co_filename)}:{f.f_lineno}:{co.co_name}")
+                    f = f.f_back
+                counts[" <- ".join(sig)] += 1
+        def dump():
+            try:
+                tot = max(1, state["n"])
+                with open(os.path.expanduser("~/fajar-profile.txt"), "w", encoding="utf-8") as fh:
+                    fh.write(f"# FAJAR sampling profiler — {tot} sampel thread utama (12ms/sampel)\n")
+                    fh.write("# %%  sampel  frame_teratas <- pemanggil <- pemanggil\n")
+                    for k, c in counts.most_common(40):
+                        fh.write(f"{c*100.0/tot:5.1f}%  {c:6d}  {k}\n")
+            except Exception:
+                pass
+        atexit.register(dump)
+        threading.Thread(target=sampler, daemon=True).start()
     def on_unmount(self):
         self._stop_watch = True
     def _save_cache(self):
