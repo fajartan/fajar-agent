@@ -1268,7 +1268,7 @@ class ModelPickerScreen(ModalScreen):
         self.app.pop_screen(); self.on_pick(chosen); self.app.notify(f"model: {chosen}")
 
 AGENT_NAME = "FAJAR-AGENT"
-AGENT_VERSION = "1.2"
+AGENT_VERSION = "1.3"
 AGENT_TAGLINE = "Bug-Bounty Hunting Harness — bertahap, memori jangka panjang, kontrol manusia"
 # logo "FAJAR" gradasi sunrise (kuning -> oranye), diakhiri wordmark AGENT
 AGENT_BANNER = (
