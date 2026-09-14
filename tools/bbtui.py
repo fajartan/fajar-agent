@@ -2142,19 +2142,26 @@ class LlmChatScreen(ModalScreen):
     def on_input_submitted(self, ev):
         self._do_submit(ev.value)
     def _do_submit(self, raw):
+        text = (raw or "").strip()
         box = self._slash_box()
-        if box and box.has_class("on"):   # palette aktif
-            val = (raw or "").strip(); tok = val.split()[0].lower() if val else ""
+        # PALET slash HANYA untuk input diawali '/'. Teks biasa (mis. 'gas', 'lanjut')
+        # SELALU dikirim ke agent -- JANGAN dibajak jadi menjalankan command ter-highlight
+        # (dulu 'gas' malah membuka /model & tak sampai ke agent).
+        if box and box.has_class("on") and text.startswith("/"):
+            tok = text.split()[0].lower()
             known = {c.split()[0] for c, _d in SLASH_HELP}
-            if tok in known:                       # yg diketik PERSIS sebuah command -> jalankan itu (+ argnya)
-                self._clear_box(); box.remove_class("on"); self._slash(val); return
-            self._fill_slash(run=True); return     # cuma prefix -> jalankan yg ter-highlight
-        text = (raw or "").strip(); self._clear_box()
+            if tok in known:                                # command persis -> jalankan (+ arg)
+                box.remove_class("on"); self._clear_box(); self._slash(text); return
+            self._fill_slash(run=True); return              # prefix -> jalankan yg ter-highlight (bersihkan sendiri)
+        if box: box.remove_class("on")
+        self._clear_box()
         if not text and self._suggest: text = self._suggest
         if text: self._submit(text)
     def _clear_box(self):
         try: self.query_one("#chatinput", ChatBox).value = ""
         except Exception: pass
+        box = self._slash_box()             # jangan biarkan palet 'nyangkut on' (set .value tak selalu picu Changed)
+        if box: box.remove_class("on")
     def _submit(self, text):
         log = self.query_one("#chatlog", SelectableLog)
         if text.startswith("/"): self._slash(text); return          # slash SELALU jalan (walau sibuk)
