@@ -1050,11 +1050,12 @@ def _toolschema(tools, provider):
         return [{"name": t["name"], "description": t["desc"], "input_schema": t["schema"]} for t in tl]
     return [{"type": "function", "function": {"name": t["name"], "description": t["desc"], "parameters": t["schema"]}} for t in tl]
 
-def chat_anthropic(messages, model, key, system=None, tools=None):
+def chat_anthropic(messages, model, key, system=None, tools=None, force_tool=False):
+    payload = {"model": model, "max_tokens": 3072, "system": system if system is not None else build_system(),
+               "messages": messages, "tools": _toolschema(tools, "anthropic"), "stream": False}
+    if force_tool and payload["tools"]: payload["tool_choice"] = {"type": "any"}   # paksa panggil tool
     r = _http_json("https://api.anthropic.com/v1/messages",
-                   {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                   {"model": model, "max_tokens": 3072, "system": system if system is not None else build_system(),
-                    "messages": messages, "tools": _toolschema(tools, "anthropic"), "stream": False})
+                   {"x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json"}, payload)
     text, calls = "", []
     for b in r.get("content", []):
         if b.get("type") == "text": text += b.get("text", "")
@@ -1063,13 +1064,13 @@ def chat_anthropic(messages, model, key, system=None, tools=None):
     return {"text": text, "calls": calls, "raw": r.get("content", []), "stop": r.get("stop_reason"),
             "usage": {"in": u.get("input_tokens", 0), "out": u.get("output_tokens", 0)}}
 
-def chat_openai(messages, model, key, base_url, system=None, tools=None):
+def chat_openai(messages, model, key, base_url, system=None, tools=None, force_tool=False):
     msgs = list(messages); sysp = system if system is not None else build_system()
     if msgs and msgs[0].get("role") == "system": msgs = [{"role": "system", "content": sysp}] + msgs[1:]
     else: msgs = [{"role": "system", "content": sysp}] + msgs
     tl = _toolschema(tools, "openai")
     payload = {"model": model, "messages": msgs, "tools": tl, "max_tokens": 3072, "stream": False}
-    if tl: payload["tool_choice"] = "auto"     # sebagian gateway perlu ini eksplisit agar mau function-call
+    if tl: payload["tool_choice"] = "required" if force_tool else "auto"   # required = paksa panggil tool
     r = _http_json(base_url.rstrip("/") + "/chat/completions",
                    {"Authorization": "Bearer " + key, "content-type": "application/json"}, payload)
     msg = r["choices"][0]["message"]
@@ -1211,6 +1212,10 @@ _PROMISE_PHRASES = ("menjalankan tool", "memanggil tool", "panggil tool", "menja
                     "menjalankan skill", "memuat skill", "mari jalankan", "mari mulai", "akan menjalankan",
                     "akan memanggil", "saya mulai tahap", "mulai tahap 1", "langkah pertama",
                     "running ", "let me run", "i'll run", "i will run", "let me start", "let's run")
+# kata perintah kerja dari user -> mode kerja aktif (nudge/diagnosa lebih agresif)
+_WORK_TRIGGERS = ("mulai", "gas", "lanjut", "cari ", "recon", "scope-gate", "scope gate", "hunting",
+                  "scan", "dedup", "analisa", "brief", "start", "go", "kerjakan", "jalankan",
+                  "eksekusi", "hunt", "teruskan", "next")
 
 ACTIVITY = {"list_programs": "mencari program", "new_programs": "cek program baru", "program_detail": "membaca scope",
             "recon": "recon", "dedup": "cek duplikat", "monitor": "memantau subdomain", "read_recon": "membaca hasil recon",
@@ -1226,11 +1231,22 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
     is_anth = provider == "anthropic"
     window = ctx_window or model_window(model)
     _CTX.clear(); _CTX.update({"provider": provider, "model": model, "key": key, "base_url": base_url, "allow_gated": allow_gated})
+    # MODE KERJA: dari pesan user TERAKHIR. Kalau user jelas menyuruh kerja ('gas'/'mulai'/
+    # 'lanjut'/goal), maka respons TANPA tool & TANPA CHECKPOINT dianggap MANDEK -> didorong,
+    # tak peduli kata-katanya (frasa-cocok terlalu rapuh utk model beragam).
+    _lu = ""
+    for _m in reversed(messages):
+        if _m.get("role") == "user":
+            c = _m.get("content"); _lu = (c if isinstance(c, str) else _msg_text(c)).strip().lower(); break
+    if _lu.startswith(("[target context", "[portfolio", "[artefak", "[ringkasan")):
+        work_mode = False          # itu konteks yg disuntik, bukan perintah kerja
+    else:
+        work_mode = (len(_lu) > 60) or any(w in _lu for w in _WORK_TRIGGERS)
     def meta(d):
         if on_meta:
             try: on_meta(d)
             except Exception: pass
-    nudged = False; any_tool = False; promised_ever = False
+    nudged = False; any_tool = False; promised_ever = False; force_next = False
     for _ in range(max_iters):
         # --- auto-compacting REAL saat konteks mendekati penuh ---
         if auto_compact and window and estimate_ctx(messages) > compact_at * window and len(messages) > 4:
@@ -1240,9 +1256,19 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
             meta({"compacted": True, "ctx": estimate_ctx(messages), "window": window})
         meta({"activity": "berpikir"})
         try:
-            resp = chat_anthropic(messages, model, key) if is_anth else chat_openai(messages, model, key, base_url)
+            resp = (chat_anthropic(messages, model, key, force_tool=force_next) if is_anth
+                    else chat_openai(messages, model, key, base_url, force_tool=force_next))
         except SystemExit as e:
-            emit("err", str(e)); meta({"activity": "idle"}); return messages
+            # force_tool bisa ditolak gateway yg tak dukung tool_choice=required -> coba sekali tanpa paksa
+            if force_next:
+                force_next = False
+                try:
+                    resp = (chat_anthropic(messages, model, key) if is_anth else chat_openai(messages, model, key, base_url))
+                except SystemExit as e2:
+                    emit("err", str(e2)); meta({"activity": "idle"}); return messages
+            else:
+                emit("err", str(e)); meta({"activity": "idle"}); return messages
+        force_next = False
         if resp.get("usage"):
             meta({"tokens": resp["usage"], "ctx": resp["usage"].get("in", 0) or estimate_ctx(messages), "window": window})
         if resp["text"].strip(): emit("llm", resp["text"].strip())
@@ -1253,21 +1279,26 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
             txt = resp["text"] or ""
             promise = any(p in txt.lower() for p in _PROMISE_PHRASES)
             if promise: promised_ever = True
-            if promise and not nudged and "CHECKPOINT" not in txt.upper():
-                nudged = True
-                emit("result", "· agent menyebut akan memakai tool tapi belum memanggilnya — melanjutkan otomatis…")
+            # MANDEK: mode kerja / ada janji-tool, TAPI respons tanpa tool & tanpa CHECKPOINT
+            # -> dorong SEKALI benar2 memanggil tool (bukan diam).
+            stuck = (promise or work_mode) and "CHECKPOINT" not in txt.upper()
+            if stuck and not nudged:
+                nudged = True; force_next = True   # retry berikut PAKSA tool (tool_choice required/any)
+                emit("result", "· agent belum memanggil tool apa pun — mendorong eksekusi tool otomatis…")
                 messages.append({"role": "user", "content":
-                    "LAKUKAN SEKARANG: panggil tool yang barusan kamu sebut (JANGAN hanya narasi niat). "
-                    "Jalankan tool berturut-turut sampai tahap ini tuntas, lalu tutup dengan baris CHECKPOINT."})
+                    "JANGAN hanya narasi. LAKUKAN SEKARANG: panggil tool (memory_search, load_skill, dedup, "
+                    "recon profile=passive, dst) untuk mengerjakan tahap ini SECARA NYATA, berturut-turut, "
+                    "lalu tutup dengan baris CHECKPOINT. Kalau tak ada tool yang relevan, tulis hasil analisamu "
+                    "lalu CHECKPOINT."})
                 meta({"activity": "berpikir"})
                 continue
-            if promised_ever and not any_tool:
-                # sudah didorong tapi model TETAP tak memanggil tool -> hampir pasti model/gateway
-                # tak mendukung function-calling. Beri diagnosa jelas, jangan diam.
-                emit("err", "model TIDAK menghasilkan pemanggilan tool (tool_calls kosong) padahal menyebutnya. "
-                            "Kemungkinan model/gateway ini tak mendukung function-calling. Solusi: ketik /model lalu "
-                            "pilih model TOOL-CAPABLE (mis. claude-sonnet, gpt-4o, atau GLM/Qwen versi function-calling), "
-                            "atau cek apakah gateway meneruskan parameter 'tools'.")
+            if (promised_ever or work_mode) and not any_tool and "CHECKPOINT" not in txt.upper():
+                # sudah didorong tapi model TETAP tak memanggil tool & tak checkpoint -> hampir pasti
+                # model/gateway tak mendukung function-calling. Beri diagnosa jelas, jangan diam.
+                emit("err", "model TIDAK memanggil tool (tool_calls kosong) & tak menutup dengan CHECKPOINT. "
+                            "Kemungkinan besar model/gateway ini TAK mendukung function-calling. Solusi tercepat: "
+                            "ketik /model lalu pilih model TOOL-CAPABLE (mis. claude-sonnet, gpt-4o, atau GLM/Qwen "
+                            "versi function-calling). (Cek juga apakah gateway meneruskan parameter 'tools'.)")
             meta({"activity": "checkpoint"}); return messages  # tahap selesai — tunggu manusia
         results = []; any_tool = True
         for c in resp["calls"]:
