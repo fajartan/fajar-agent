@@ -853,6 +853,7 @@ Untuk kerja PARALEL/besar, pakai `delegate` → beberapa SUB-AGEN (recon/dedup/a
 
 == MODEL KERJA: TIAP TAHAP OTONOM, CHECKPOINT DI ANTARA TAHAP ==
 DI DALAM satu tahap: bekerja OTONOM penuh — panggil semua tool yg perlu berturut-turut untuk menuntaskan tahap itu tanpa nanya (untuk tool AMAN). Jangan berhenti di tengah tahap.
+DILARANG KERAS: menulis "saya menjalankan/memanggil tool …" atau "menjalankan recon/dedup/memory …" TANPA benar-benar menyertakan pemanggilan tool (tool_use) di respons yang SAMA. Kalau menyebut akan memakai tool -> LANGSUNG panggil tool-nya sekarang, jangan cuma narasi lalu berhenti. Respons berisi niat tapi tanpa tool_use = dianggap MANDEK (bukan checkpoint).
 Setelah SATU tahap tuntas:
   1) lapor hasil ringkas berlabel [FAKTA]/[HIPOTESIS],
   2) tulis baris: "CHECKPOINT <tahap sekarang> selesai → lanjut ke <tahap berikut>? balas 'lanjut' / 'stop' / arahan lain",
@@ -1196,6 +1197,13 @@ def compact(messages, provider, model, key, base_url):
     out.extend(tail)
     return out
 
+# frasa "janji memakai tool" -> kalau muncul TANPA tool_use, agent cuma narasi niat lalu berhenti.
+_PROMISE_PHRASES = ("menjalankan tool", "memanggil tool", "panggil tool", "menjalankan memory",
+                    "memory recall", "menjalankan dedup", "menjalankan recon", "recon pasif",
+                    "menjalankan skill", "memuat skill", "mari jalankan", "mari mulai", "akan menjalankan",
+                    "akan memanggil", "saya mulai tahap", "mulai tahap 1", "langkah pertama",
+                    "running ", "let me run", "i'll run", "i will run", "let me start", "let's run")
+
 ACTIVITY = {"list_programs": "mencari program", "new_programs": "cek program baru", "program_detail": "membaca scope",
             "recon": "recon", "dedup": "cek duplikat", "monitor": "memantau subdomain", "read_recon": "membaca hasil recon",
             "list_ext_tools": "lihat ext-tools", "run_ext_tool": "menjalankan ext-tool", "save_note": "menulis catatan",
@@ -1214,6 +1222,7 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
         if on_meta:
             try: on_meta(d)
             except Exception: pass
+    nudged = False
     for _ in range(max_iters):
         # --- auto-compacting REAL saat konteks mendekati penuh ---
         if auto_compact and window and estimate_ctx(messages) > compact_at * window and len(messages) > 4:
@@ -1231,6 +1240,18 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
         if resp["text"].strip(): emit("llm", resp["text"].strip())
         _append_assistant(messages, resp, is_anth)
         if not resp["calls"]:
+            # NARASI-NIAT-TANPA-TOOL: model bilang "menjalankan tool…" tapi tak ada tool_use
+            # & tak ada CHECKPOINT -> dorong SEKALI utk benar2 memanggil tool (bukan diam/idle).
+            txt = resp["text"] or ""
+            if (not nudged and "CHECKPOINT" not in txt.upper()
+                    and any(p in txt.lower() for p in _PROMISE_PHRASES)):
+                nudged = True
+                emit("result", "· agent menyebut akan memakai tool tapi belum memanggilnya — melanjutkan otomatis…")
+                messages.append({"role": "user", "content":
+                    "LAKUKAN SEKARANG: panggil tool yang barusan kamu sebut (JANGAN hanya narasi niat). "
+                    "Jalankan tool berturut-turut sampai tahap ini tuntas, lalu tutup dengan baris CHECKPOINT."})
+                meta({"activity": "berpikir"})
+                continue
             meta({"activity": "checkpoint"}); return messages  # tahap selesai — tunggu manusia
         results = []
         for c in resp["calls"]:

@@ -2295,13 +2295,14 @@ class LlmChatScreen(ModalScreen):
             elif kind == "tool":
                 nm = body.split(" ", 1)[0]; arg = body.split(" ", 1)[1] if " " in body else ""
                 from rich.markup import escape as _e
-                w(f"  [yellow]*[/] [b]{nm}[/] [dim]{_e(arg[:120])}[/]")
+                friendly = _llm_mod().ACTIVITY.get(nm, nm)   # nama aktivitas ramah (ala Hermes)
+                w(f"  [yellow]▸[/] [b yellow]{_e(friendly)}[/] [dim]· {nm} {_e(arg[:110])}[/]")
             elif kind == "result":
                 from rich.markup import escape as _e
                 lines = [l for l in body.splitlines() if l.strip()]
                 head = _e(lines[0].lstrip("#").strip()[:130]) if lines else "(kosong)"
-                more = f" [dim]... +{len(lines)-1} baris (dipakai agent, tak ditampilkan penuh)[/]" if len(lines) > 1 else ""
-                w(f"  [dim]>[/] {head}{more}")
+                more = f" [dim]· +{len(lines)-1} baris[/]" if len(lines) > 1 else ""
+                w(f"    [green]✓[/] [dim]{head}{more}[/]")
             else:
                 from rich.markup import escape as _e
                 w(f"[red]! {_e(body)}[/]")
