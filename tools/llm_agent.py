@@ -1067,15 +1067,23 @@ def chat_openai(messages, model, key, base_url, system=None, tools=None):
     msgs = list(messages); sysp = system if system is not None else build_system()
     if msgs and msgs[0].get("role") == "system": msgs = [{"role": "system", "content": sysp}] + msgs[1:]
     else: msgs = [{"role": "system", "content": sysp}] + msgs
+    tl = _toolschema(tools, "openai")
+    payload = {"model": model, "messages": msgs, "tools": tl, "max_tokens": 3072, "stream": False}
+    if tl: payload["tool_choice"] = "auto"     # sebagian gateway perlu ini eksplisit agar mau function-call
     r = _http_json(base_url.rstrip("/") + "/chat/completions",
-                   {"Authorization": "Bearer " + key, "content-type": "application/json"},
-                   {"model": model, "messages": msgs, "tools": _toolschema(tools, "openai"), "max_tokens": 3072, "stream": False})
+                   {"Authorization": "Bearer " + key, "content-type": "application/json"}, payload)
     msg = r["choices"][0]["message"]
     calls = []
     for c in (msg.get("tool_calls") or []):
-        try: args = json.loads(c["function"].get("arguments") or "{}")
+        fn = c.get("function") or {}
+        try: args = json.loads(fn.get("arguments") or "{}")
         except Exception: args = {}
-        calls.append({"id": c["id"], "name": c["function"]["name"], "input": args})
+        calls.append({"id": c.get("id") or ("call_%d" % len(calls)), "name": fn.get("name", ""), "input": args})
+    if not calls and msg.get("function_call"):   # KOMPAT format lama (function_call tunggal)
+        fc = msg["function_call"]
+        try: args = json.loads(fc.get("arguments") or "{}")
+        except Exception: args = {}
+        if fc.get("name"): calls.append({"id": "call_0", "name": fc["name"], "input": args})
     u = r.get("usage", {}) or {}
     return {"text": msg.get("content") or "", "calls": calls, "raw": msg, "stop": r["choices"][0].get("finish_reason"),
             "usage": {"in": u.get("prompt_tokens", 0), "out": u.get("completion_tokens", 0)}}
@@ -1222,7 +1230,7 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
         if on_meta:
             try: on_meta(d)
             except Exception: pass
-    nudged = False
+    nudged = False; any_tool = False; promised_ever = False
     for _ in range(max_iters):
         # --- auto-compacting REAL saat konteks mendekati penuh ---
         if auto_compact and window and estimate_ctx(messages) > compact_at * window and len(messages) > 4:
@@ -1243,8 +1251,9 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
             # NARASI-NIAT-TANPA-TOOL: model bilang "menjalankan tool…" tapi tak ada tool_use
             # & tak ada CHECKPOINT -> dorong SEKALI utk benar2 memanggil tool (bukan diam/idle).
             txt = resp["text"] or ""
-            if (not nudged and "CHECKPOINT" not in txt.upper()
-                    and any(p in txt.lower() for p in _PROMISE_PHRASES)):
+            promise = any(p in txt.lower() for p in _PROMISE_PHRASES)
+            if promise: promised_ever = True
+            if promise and not nudged and "CHECKPOINT" not in txt.upper():
                 nudged = True
                 emit("result", "· agent menyebut akan memakai tool tapi belum memanggilnya — melanjutkan otomatis…")
                 messages.append({"role": "user", "content":
@@ -1252,8 +1261,15 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
                     "Jalankan tool berturut-turut sampai tahap ini tuntas, lalu tutup dengan baris CHECKPOINT."})
                 meta({"activity": "berpikir"})
                 continue
+            if promised_ever and not any_tool:
+                # sudah didorong tapi model TETAP tak memanggil tool -> hampir pasti model/gateway
+                # tak mendukung function-calling. Beri diagnosa jelas, jangan diam.
+                emit("err", "model TIDAK menghasilkan pemanggilan tool (tool_calls kosong) padahal menyebutnya. "
+                            "Kemungkinan model/gateway ini tak mendukung function-calling. Solusi: ketik /model lalu "
+                            "pilih model TOOL-CAPABLE (mis. claude-sonnet, gpt-4o, atau GLM/Qwen versi function-calling), "
+                            "atau cek apakah gateway meneruskan parameter 'tools'.")
             meta({"activity": "checkpoint"}); return messages  # tahap selesai — tunggu manusia
-        results = []
+        results = []; any_tool = True
         for c in resp["calls"]:
             meta({"activity": ACTIVITY.get(c["name"], c["name"])})
             emit("tool", f"{c['name']} {json.dumps(c['input'], ensure_ascii=False)}")

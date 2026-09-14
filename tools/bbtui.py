@@ -2142,21 +2142,14 @@ class LlmChatScreen(ModalScreen):
     def on_input_submitted(self, ev):
         self._do_submit(ev.value)
     def _do_submit(self, raw):
+        # Enter SELALU mengirim teks apa adanya. Palet slash HANYA alat bantu (Tab=lengkapi,
+        # klik=jalankan) -> TIDAK PERNAH membajak Enter. Ini menutup semua celah 'gas' -> /model.
         text = (raw or "").strip()
         box = self._slash_box()
-        # PALET slash HANYA untuk input diawali '/'. Teks biasa (mis. 'gas', 'lanjut')
-        # SELALU dikirim ke agent -- JANGAN dibajak jadi menjalankan command ter-highlight
-        # (dulu 'gas' malah membuka /model & tak sampai ke agent).
-        if box and box.has_class("on") and text.startswith("/"):
-            tok = text.split()[0].lower()
-            known = {c.split()[0] for c, _d in SLASH_HELP}
-            if tok in known:                                # command persis -> jalankan (+ arg)
-                box.remove_class("on"); self._clear_box(); self._slash(text); return
-            self._fill_slash(run=True); return              # prefix -> jalankan yg ter-highlight (bersihkan sendiri)
         if box: box.remove_class("on")
         self._clear_box()
         if not text and self._suggest: text = self._suggest
-        if text: self._submit(text)
+        if text: self._submit(text)   # _submit: '/xxx' -> slash; selain itu -> agent
     def _clear_box(self):
         try: self.query_one("#chatinput", ChatBox).value = ""
         except Exception: pass
