@@ -913,6 +913,7 @@ Kamu juga bisa PASANG skill baru via install_skill (dari URL/file/text) — tapi
 
 == ATURAN KERAS ==
 - Tool AMAN (list_programs, new_programs, program_detail, recon pasif, dedup, monitor, read_recon, read_file, ingest_folder, search_files, list_ext_tools, list_skills, load_skill, memory_*, delegate) boleh langsung.
+- CARA PANGGIL TOOL: utamakan tool_use/function-calling NATIVE. TAPI kalau provider/gateway-mu tak mendukungnya, panggil tool dengan menulis baris PERSIS:  @tool <nama> {json-args}  (satu tool per baris; JSON valid; mis. `@tool memory_search {"query": "remitly"}` atau `@tool dedup {"handle": "remitly"}`). FAJAR akan menjalankannya lalu memberi hasilnya. JANGAN cuma narasi "menjalankan tool" tanpa benar-benar memanggil (native ATAU @tool).
 - Bila user meng-upload/drag file atau folder (memberi path), pakai read_file/ingest_folder/search_files untuk menganalisanya (endpoint, secret, kelas bug).
 - Tool bernama `mcp__<server>__<tool>` = integrasi MCP eksternal (bila terpasang). Pakai bila relevan; sebagian gated (butuh izin) sesuai kepercayaan server.
 - Tool BERDAMPAK (recon standard/deep, run_ext_tool, workspace, save_note, notify) minta izin — dan hanya di tahap yg sesuai.
@@ -1023,6 +1024,27 @@ def _loads_resilient(text):
     except Exception:
         raise json.JSONDecodeError("respons LLM bukan JSON valid (cuplikan: %r)" % (t[:200],), t or "", 0)
 
+def _debug_llm(url, payload, raw):
+    """FAJAR_DEBUG_LLM=1 -> catat request (tanpa kunci) + response MENTAH ke file, biar
+    kelihatan persis apa yg dikirim & dikembalikan gateway (mis. tool_calls ada/tidak)."""
+    if not os.environ.get("FAJAR_DEBUG_LLM"):
+        return
+    try:
+        p = os.path.expanduser("~/fajar-llm-debug.log")
+        safe = dict(payload)
+        # ringkas 'messages' & 'tools' biar tak kebanjiran, tapi tampilkan strukturnya
+        if isinstance(safe.get("tools"), list):
+            safe["tools"] = f"[{len(safe['tools'])} tools] contoh: " + json.dumps(safe["tools"][0], ensure_ascii=False)[:400]
+        if isinstance(safe.get("messages"), list):
+            safe["messages"] = f"[{len(safe['messages'])} pesan; role terakhir={safe['messages'][-1].get('role')}]"
+        with open(p, "a", encoding="utf-8") as f:
+            f.write("\n===== " + datetime.datetime.now().isoformat() + " =====\n")
+            f.write("URL: " + url + "\n")
+            f.write("REQ: " + json.dumps(safe, ensure_ascii=False)[:1500] + "\n")
+            f.write("RESP(mentah, 4000): " + (raw or "")[:4000] + "\n")
+    except Exception:
+        pass
+
 def _http_json(url, headers, payload, timeout=180, retries=3):
     """POST JSON dgn retry pada error transient (429/5xx/timeout/koneksi) + backoff."""
     body = json.dumps(payload).encode()
@@ -1031,7 +1053,9 @@ def _http_json(url, headers, payload, timeout=180, retries=3):
         try:
             req = urllib.request.Request(url, data=body, headers=headers, method="POST")
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return _loads_resilient(r.read().decode("utf-8", "replace"))
+                raw = r.read().decode("utf-8", "replace")
+                _debug_llm(url, payload, raw)
+                return _loads_resilient(raw)
         except urllib.error.HTTPError as e:
             msg = e.read().decode("utf-8", "replace")[:400]; last = f"[LLM API {e.code}] {msg}"
             if e.code in (429, 500, 502, 503, 504, 529) and attempt < retries - 1:
@@ -1217,6 +1241,23 @@ _WORK_TRIGGERS = ("mulai", "gas", "lanjut", "cari ", "recon", "scope-gate", "sco
                   "scan", "dedup", "analisa", "brief", "start", "go", "kerjakan", "jalankan",
                   "eksekusi", "hunt", "teruskan", "next")
 
+# FALLBACK panggilan tool berbasis TEKS -> utk model/gateway yg tak balikin tool_calls native.
+# Model menulis baris:  @tool <nama> {json-args}   (satu per baris). FAJAR jalankan & umpan balik.
+_TOOL_LINE = re.compile(r'@tool\s+([A-Za-z_][\w]*)\s*(\{.*\})?\s*$', re.MULTILINE)
+
+def _parse_text_tools(text):
+    calls = []
+    for i, m in enumerate(_TOOL_LINE.finditer(text or "")):
+        name = m.group(1)
+        if name not in BYNAME:
+            continue
+        raw = m.group(2) or "{}"
+        try: args = json.loads(raw)
+        except Exception: args = {}
+        if not isinstance(args, dict): args = {}
+        calls.append({"id": "text_%d" % i, "name": name, "input": args})
+    return calls
+
 ACTIVITY = {"list_programs": "mencari program", "new_programs": "cek program baru", "program_detail": "membaca scope",
             "recon": "recon", "dedup": "cek duplikat", "monitor": "memantau subdomain", "read_recon": "membaca hasil recon",
             "list_ext_tools": "lihat ext-tools", "run_ext_tool": "menjalankan ext-tool", "save_note": "menulis catatan",
@@ -1271,12 +1312,27 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
         force_next = False
         if resp.get("usage"):
             meta({"tokens": resp["usage"], "ctx": resp["usage"].get("in", 0) or estimate_ctx(messages), "window": window})
-        if resp["text"].strip(): emit("llm", resp["text"].strip())
+        _disp = _TOOL_LINE.sub("", resp["text"] or "").strip()   # sembunyikan baris protokol @tool dari layar
+        if _disp: emit("llm", _disp)
         _append_assistant(messages, resp, is_anth)
         if not resp["calls"]:
+            txt = resp["text"] or ""
+            # FALLBACK TEKS: model tulis '@tool <nama> {json}' (gateway tanpa function-calling native).
+            tcalls = _parse_text_tools(txt)
+            if tcalls:
+                any_tool = True; outs = []
+                for tc in tcalls:
+                    meta({"activity": ACTIVITY.get(tc["name"], tc["name"])})
+                    emit("tool", f"{tc['name']} {json.dumps(tc['input'], ensure_ascii=False)}")
+                    out = execute_tool(tc["name"], tc["input"], allow_gated, confirm)
+                    emit("result", out)
+                    outs.append(f"[HASIL TOOL {tc['name']}]\n{out}")
+                messages.append({"role": "user", "content": "\n\n".join(outs) +
+                    "\n\n(Lanjutkan tahap. Panggil tool lagi via '@tool <nama> {json}' bila perlu, "
+                    "atau tutup dengan baris CHECKPOINT.)"})
+                meta({"activity": "berpikir"}); continue
             # NARASI-NIAT-TANPA-TOOL: model bilang "menjalankan tool…" tapi tak ada tool_use
             # & tak ada CHECKPOINT -> dorong SEKALI utk benar2 memanggil tool (bukan diam/idle).
-            txt = resp["text"] or ""
             promise = any(p in txt.lower() for p in _PROMISE_PHRASES)
             if promise: promised_ever = True
             # MANDEK: mode kerja / ada janji-tool, TAPI respons tanpa tool & tanpa CHECKPOINT
@@ -1287,9 +1343,10 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
                 emit("result", "· agent belum memanggil tool apa pun — mendorong eksekusi tool otomatis…")
                 messages.append({"role": "user", "content":
                     "JANGAN hanya narasi. LAKUKAN SEKARANG: panggil tool (memory_search, load_skill, dedup, "
-                    "recon profile=passive, dst) untuk mengerjakan tahap ini SECARA NYATA, berturut-turut, "
-                    "lalu tutup dengan baris CHECKPOINT. Kalau tak ada tool yang relevan, tulis hasil analisamu "
-                    "lalu CHECKPOINT."})
+                    "recon profile=passive, dst) untuk mengerjakan tahap ini SECARA NYATA, berturut-turut. "
+                    "Kalau provider-mu TIDAK mendukung tool_use/function-calling native, panggil tool dengan "
+                    "menulis baris PERSIS:  @tool <nama> {\"arg\": \"nilai\"}  (satu tool per baris, JSON valid, "
+                    "mis. @tool dedup {\"handle\": \"remitly\"}). Setelah tuntas, tutup dengan baris CHECKPOINT."})
                 meta({"activity": "berpikir"})
                 continue
             if (promised_ever or work_mode) and not any_tool and "CHECKPOINT" not in txt.upper():
