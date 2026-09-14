@@ -28,8 +28,21 @@ Semua perintah meneruskan argumen ke tool di tools/.
 """
 import os, sys, subprocess
 
-VERSION = "1.1"
 D = os.path.dirname(os.path.abspath(__file__))
+
+def _read_version():
+    # SUMBER TUNGGAL: tools/_version.py (fallback ke _version.py sejajar). Dibaca via
+    # parse teks -> tak butuh import/dependensi, tahan lokasi.
+    for vf in (os.path.join(D, "tools", "_version.py"), os.path.join(D, "_version.py")):
+        try:
+            for ln in open(vf, encoding="utf-8"):
+                if ln.strip().startswith("VERSION"):
+                    return ln.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            continue
+    return "?"
+
+VERSION = _read_version()
 
 def _version():
     sha = ""

@@ -1268,7 +1268,16 @@ class ModelPickerScreen(ModalScreen):
         self.app.pop_screen(); self.on_pick(chosen); self.app.notify(f"model: {chosen}")
 
 AGENT_NAME = "FAJAR-AGENT"
-AGENT_VERSION = "1.3"
+def _read_version():   # SUMBER TUNGGAL: tools/_version.py -> header TUI & --version selalu sama
+    for vf in (os.path.join(SCRIPT_DIR, "_version.py"), os.path.join(SCRIPT_DIR, "tools", "_version.py")):
+        try:
+            for ln in open(vf, encoding="utf-8"):
+                if ln.strip().startswith("VERSION"):
+                    return ln.split("=", 1)[1].strip().strip('"').strip("'")
+        except Exception:
+            continue
+    return "1.3"
+AGENT_VERSION = _read_version()
 AGENT_TAGLINE = "Bug-Bounty Hunting Harness — bertahap, memori jangka panjang, kontrol manusia"
 # logo "FAJAR" gradasi sunrise (kuning -> oranye), diakhiri wordmark AGENT
 AGENT_BANNER = (
