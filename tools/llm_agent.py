@@ -1243,7 +1243,7 @@ _WORK_TRIGGERS = ("mulai", "gas", "lanjut", "cari ", "recon", "scope-gate", "sco
 
 # FALLBACK panggilan tool berbasis TEKS -> utk model/gateway yg tak balikin tool_calls native.
 # Model menulis baris:  @tool <nama> {json-args}   (satu per baris). FAJAR jalankan & umpan balik.
-_TOOL_LINE = re.compile(r'@tool\s+([A-Za-z_][\w]*)\s*(\{.*\})?\s*$', re.MULTILINE)
+_TOOL_LINE = re.compile(r'^[\s>*\-]*@tool[:\s]+([A-Za-z_][\w]*)\s*(\{.*\})?\s*$', re.MULTILINE)
 
 def _parse_text_tools(text):
     calls = []
@@ -1340,13 +1340,19 @@ def agent_turn(messages, provider, model, key, base_url, emit, allow_gated=False
             stuck = (promise or work_mode) and "CHECKPOINT" not in txt.upper()
             if stuck and not nudged:
                 nudged = True; force_next = True   # retry berikut PAKSA tool (tool_choice required/any)
-                emit("result", "· agent belum memanggil tool apa pun — mendorong eksekusi tool otomatis…")
+                emit("result", "· agent belum memanggil tool — memaksa pakai protokol teks @tool…")
                 messages.append({"role": "user", "content":
-                    "JANGAN hanya narasi. LAKUKAN SEKARANG: panggil tool (memory_search, load_skill, dedup, "
-                    "recon profile=passive, dst) untuk mengerjakan tahap ini SECARA NYATA, berturut-turut. "
-                    "Kalau provider-mu TIDAK mendukung tool_use/function-calling native, panggil tool dengan "
-                    "menulis baris PERSIS:  @tool <nama> {\"arg\": \"nilai\"}  (satu tool per baris, JSON valid, "
-                    "mis. @tool dedup {\"handle\": \"remitly\"}). Setelah tuntas, tutup dengan baris CHECKPOINT."})
+                    "PENTING: tool_use/function-calling NATIVE TIDAK diteruskan gateway di sesi ini "
+                    "(percobaan native-mu tak sampai). JANGAN pakai native lagi & JANGAN narasi. "
+                    "WAJIB panggil tool dengan menulis baris TEKS PERSIS berformat:\n"
+                    "@tool <nama_tool> {json-args}\n"
+                    "satu tool per baris, JSON valid. Balasanmu SEKARANG harus berisi baris @tool itu "
+                    "(boleh beberapa). Contoh untuk memulai HUNTING BRIEF:\n"
+                    "@tool memory_search {\"query\": \"Remitly\"}\n"
+                    "@tool dedup {\"handle\": \"remitly\"}\n"
+                    "@tool load_skill {\"name\": \"recon-runbook\"}\n"
+                    "Tulis baris @tool untuk tool yang kamu perlukan sekarang (jangan yang lain). "
+                    "Setelah aku beri hasilnya, lanjutkan; tutup tahap dengan baris CHECKPOINT."})
                 meta({"activity": "berpikir"})
                 continue
             if (promised_ever or work_mode) and not any_tool and "CHECKPOINT" not in txt.upper():
